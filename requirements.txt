@@ -1,0 +1,11 @@
+requests
+sshtunnel
+pika
+toml
+psutil
+pexpect
+pycryptodome
+pyjwt
+urllib3
+PyQt5
+tabulate
