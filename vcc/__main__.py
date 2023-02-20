@@ -8,6 +8,11 @@ from vcc.schedule import upload_schedule_files
 masters = {None: None, 'all': 'all', 'std': 'standard', 'int': 'intensive'}
 
 
+def show_version():
+    import pkg_resources  # part of setuptools
+    print('vcc version', pkg_resources.require("vcc")[0].version)
+
+
 def main():
     import argparse
 
@@ -15,6 +20,7 @@ def main():
     parser.add_argument('-c', '--config', help='config file', required=False)
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument('-v', '--viewer', help='view upcoming sessions', choices=masters.keys(), required=False)
+    group.add_argument('-V', '--version', help='display version', action='store_true', required=False)
     group.add_argument('-s', '--sked', help='update VCC with sked files', nargs='+', required=False)
     parser.add_argument('param', help='station or session code', nargs='?')
 
@@ -22,6 +28,8 @@ def main():
 
     args = settings.init(parser.parse_args())
 
+    if args.version:
+        show_version()
     if args.viewer:
         SessionPicker(masters[args.viewer]).exec()
     elif args.sked:
