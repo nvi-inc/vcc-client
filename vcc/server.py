@@ -7,6 +7,7 @@ import pkg_resources
 from io import StringIO
 
 from Crypto.Cipher import PKCS1_OAEP, AES
+from base64 import b64decode, b64encode
 from paramiko import RSAKey
 
 
@@ -198,7 +199,7 @@ class VCC:
             raise VCCError(str(exc))
 
 
-def get_server(group_id):
+def get_server_old(group_id):
     info = signature.check(group_id)
     f = pkg_resources.resource_stream(__name__, 'data/sv.bin')
     parts = [f.read(x) for x in [16, 16, -1]]
@@ -207,4 +208,17 @@ def get_server(group_id):
         name = name.lower()
         config['key'] = settings.RSAkey.path
         config['url'] = getattr(settings.URL, name, config['url']) if hasattr(settings, 'URL') else config['url']
+        yield name, make_object(config)
+
+
+def get_server(group_id):
+    info = signature.check(group_id)
+    for name, encrypted in settings.Servers.items():
+        parts = [b64decode(bytes.fromhex(x)) for x in encrypted.split('-')]
+        cip = AES.new(info, AES.MODE_EAX, parts[1])
+        config = toml.loads(cip.decrypt_and_verify(parts[2], parts[0]).decode('utf-8'))
+        name = name.lower()
+        config['key'] = settings.RSAkey.path
+        config['url'] = getattr(settings.URL, name, config['url']) if hasattr(settings, 'URL') else config['url']
+        print(name, config)
         yield name, make_object(config)
