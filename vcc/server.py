@@ -213,12 +213,11 @@ def get_server_old(group_id):
 
 def get_server(group_id):
     info = signature.check(group_id)
-    for name, encrypted in settings.Servers.items():
+    for name, encrypted in settings.Servers.__dict__.items():
         parts = [b64decode(bytes.fromhex(x)) for x in encrypted.split('-')]
         cip = AES.new(info, AES.MODE_EAX, parts[1])
         config = toml.loads(cip.decrypt_and_verify(parts[2], parts[0]).decode('utf-8'))
-        name = name.lower()
         config['key'] = settings.RSAkey.path
-        config['url'] = getattr(settings.URL, name, config['url']) if hasattr(settings, 'URL') else config['url']
-        print(name, config)
-        yield name, make_object(config)
+        if hasattr(settings, 'URL'):
+            config['url'] = getattr(settings.URL, name, getattr(settings.URL, name.lower(), config['url']))
+        yield name.lower(), make_object(config)
