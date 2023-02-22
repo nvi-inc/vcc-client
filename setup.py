@@ -4,7 +4,7 @@ setup(
     name='vcc',
     packages=['vcc', 'vcc.ns'],
     description='VCC Schedule uploader for Operations Center client',
-    version='1.1.0',
+    version='1.2.0',
     url='http://github.com/example/linode_example',
     author='Mario',
     author_email='mario.berube@nviinc.com',

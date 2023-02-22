@@ -1,4 +1,5 @@
 import requests
+import traceback
 import logging
 import logging.handlers
 
@@ -117,13 +118,13 @@ class VCC:
     # Get first available VWS client
     def connect(self):
         # Get list of VLBI Communications Center (VCC)
-        for name, config in get_server(self.group_id):
+        for name, config in get_server():
             self.url, self.protocol = config.url, config.protocol
             self.api_port, self.msg_port = config.api_port, config.msg_port
             if getattr(config, 'tunnel', None):
                 try:
                     self.name, self.tunnel = self.start_tunnel(name, config)
-                except (BaseSSHTunnelForwarderError, HandlerSSHTunnelForwarderError) as exc:
+                except (BaseSSHTunnelForwarderError, HandlerSSHTunnelForwarderError):
                     continue
 
             # Test VCC API can be reached
@@ -199,24 +200,11 @@ class VCC:
             raise VCCError(str(exc))
 
 
-def get_server_old(group_id):
-    info = signature.check(group_id)
-    f = pkg_resources.resource_stream(__name__, 'data/sv.bin')
-    parts = [f.read(x) for x in [16, 16, -1]]
-    cip = AES.new(info, AES.MODE_EAX, parts[1])
-    for name, config in toml.loads(cip.decrypt_and_verify(parts[2], parts[0]).decode('utf-8')).items():
-        name = name.lower()
-        config['key'] = settings.RSAkey.path
-        config['url'] = getattr(settings.URL, name, config['url']) if hasattr(settings, 'URL') else config['url']
-        yield name, make_object(config)
-
-
-def get_server(group_id):
-    info = signature.check(group_id)
+def get_server():
     for name, encrypted in settings.Servers.__dict__.items():
         parts = [b64decode(bytes.fromhex(x)) for x in encrypted.split('-')]
-        cip = AES.new(info, AES.MODE_EAX, parts[1])
-        config = toml.loads(cip.decrypt_and_verify(parts[2], parts[0]).decode('utf-8'))
+        cipher = AES.new(parts[0], AES.MODE_EAX, parts[2])
+        config = toml.loads(cipher.decrypt_and_verify(parts[3], parts[1]).decode('utf-8'))
         config['key'] = settings.RSAkey.path
         if hasattr(settings, 'URL'):
             config['url'] = getattr(settings.URL, name, getattr(settings.URL, name.lower(), config['url']))

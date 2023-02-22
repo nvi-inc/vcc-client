@@ -10,7 +10,7 @@ from vcc import settings, VCCError, decrypt
 
 # Make signature and encode using ssh private key
 def make(group_id, data=None, exp=0):
-    code, uid, _ = getattr(settings.Signatures, group_id)
+    code, uid = getattr(settings.Signatures, group_id)
     required = {'code': code, 'group': group_id}
     data = dict(**data, **required) if data else required
     if exp > 0:
@@ -36,10 +36,3 @@ def validate(rsp):
         return json.loads(decrypt(info['encrypted'], uid[9:23]).decode()) if 'encrypted' in info else info
     except (jwt.exceptions.ExpiredSignatureError, jwt.exceptions.InvalidSignatureError) as exc:
         raise VCCError(f'signature {str(exc)}')
-
-
-def check(group_id):
-    code, uid, coded = getattr(settings.Signatures, group_id)
-    parts = [b64decode(bytes.fromhex(x)) for x in coded.lower().split('-')]
-    cip = AES.new(f'{uid[-12:]}{uid[9:13]}'.encode('utf-8'), AES.MODE_EAX, parts[1])
-    return cip.decrypt_and_verify(parts[2], parts[0])[:24]

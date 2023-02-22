@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from vcc import settings, signature, VCCError, groups
 from vcc.messaging import RMQclientException
-from vcc.server import VCC, get_server
+from vcc.server import VCC
 
 
 # Test that inbox is available

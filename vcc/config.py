@@ -4,14 +4,16 @@ from pathlib import Path
 import toml
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP, AES
+from base64 import b64decode
 
 
 def decode_config(input_file, output_file, key_file):
     try:
         private_key = RSA.import_key(open(key_file, "rb").read())
 
-        with open(input_file, 'rb') as f_in:
-            enc_key, nonce, tag, encrypted = [f_in.read(x) for x in (private_key.size_in_bytes(), 16, 16, -1)]
+        with open(input_file, 'r') as f_in:
+            enc_key, nonce, tag, encrypted = [b64decode(bytes.fromhex(x)) for x in f_in.read().split('-')]
+            # enc_key, nonce, tag, encrypted = [f_in.read(x) for x in (private_key.size_in_bytes(), 16, 16, -1)]
             key = PKCS1_OAEP.new(private_key).decrypt(enc_key)
             config = AES.new(key, AES.MODE_EAX, nonce).decrypt_and_verify(encrypted, tag).decode('utf-8')
             settings = toml.loads(config)

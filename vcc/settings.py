@@ -26,7 +26,8 @@ def init(args):
                 data = toml.load(path.open())
                 # Set some default folders
             except toml.TomlDecodeError as exc:
-                raise BadConfigurationFile(f'Error reading {path} [{str(exc)}]')
+                print(f'Error reading {path} [{str(exc)}]')
+                exit(0)
             # Add information in config file to this module
             make_object(data, this_module)
             return args
