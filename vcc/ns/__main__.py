@@ -207,16 +207,17 @@ def main():
         print('Only Network Station can run this action')
         sys.exit(0)
     set_logger(console=args.debug)
+    sta_id = settings.Signatures.NS[0]
 
     if args.action in ['start', 'restart']:
-        set_logger('/usr2/log/vcc.log', prefix='vcc-', console=args.debug)
+        set_logger('/usr2/oper/vcc.log', prefix='vcc-', console=args.debug)
         getattr(sys.modules[__name__], args.action)()
     elif args.action == 'drudg':
         drudg_it(args.drudg, args.vex)
     elif args.action == 'onoff':
         onoff(args.log)
     elif args.action == 'log':
-        upload(args.log, args.full, args.reduce)
+        upload(sta_id, args.log, args.full, args.reduce)
     elif args.action == 'next':
         upcoming(args.days, args.print)
 
