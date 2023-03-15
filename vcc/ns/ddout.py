@@ -9,6 +9,7 @@ from psutil import process_iter, AccessDenied, NoSuchProcess
 
 from vcc import VCCError
 from vcc.messaging import RMQclientException
+from vcc.ns.onoff import post_onoff
 
 logger = logging.getLogger('vcc')
 
@@ -88,13 +89,7 @@ class DDoutScanner(Thread):
 
     # Send ONOFF record to VCC
     def send_onoff(self):
-        if self.onoff:
-            rsp = self.vcc.get_api().post('onoff', data=self.onoff)
-            if rsp:
-                logger.info(f'onoff records uploaded')
-            else:
-                logger.warning(f'fail uploading onoff records {rsp.text}')
-            self.onoff = []
+        self.onoff = post_onoff(self.vcc.get_api(), self.onoff)
 
     # Send station status to VCC Messenger
     def send_status(self, info):
