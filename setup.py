@@ -4,7 +4,7 @@ setup(
     name='vcc',
     packages=['vcc', 'vcc.ns'],
     description='Client software for VLBI Operations Center (VCC)',
-    version='1.2.1',
+    version='1.2.2',
     url='http://github.com/',
     author='Mario',
     author_email='mario.berube@nviinc.com',
