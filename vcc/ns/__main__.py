@@ -4,6 +4,7 @@ import sys
 import signal
 import logging
 import time
+import json
 from datetime import datetime
 from psutil import Process, process_iter
 
@@ -153,16 +154,17 @@ def upcoming(days, print_it=False):
         now = datetime.utcnow()
         title, lines = f'List of upcoming sessions for {sta_id}', []
         if rsp:
-            index = 1
-            for data in rsp.json():
-                session = Session(data)
-                if session.start > now:
-                    lines.append(f'{index:2d} {session}')
-                    index += 1
-            message = '\n'.join(lines)
-            print(f'\n{title}\n{"=" * len(title)}\n{message}\n') if print_it else notify(title, message)
+            sessions = [data for data in rsp.json() if datetime.fromisoformat(data['start']) > now]
+            if print_it:
+                message = '\n'.join([f'{index:2d} {Session(session)}' for index, session in enumerate(sessions)])
+                print(f'\n{title}\n{"=" * len(title)}\n{message}\n')
+            else:
+                message = json.dumps(sessions)
+                notify(title, message, option='-s')
+        elif print_it:
+            print('VCC problem', rsp.text)
         else:
-            (print if print_it else notify)('VCC problem', rsp.text)
+            notify('VCC problem', rsp.text)
 
 
 def main():

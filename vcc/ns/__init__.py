@@ -25,8 +25,8 @@ def get_displays(all_users=False, display=None):
 
 
 # Notify oper using vcc message_box. Pop message box to all displays or the user display
-def _notify(title, message, all_users=False, display=None):
-    cmd = f"vcc-message \'{title}\' \'{message}\'"
+def notify(title, message, option='', all_users=False, display=None):
+    cmd = f"vcc-message {option} \'{title}\' \'{message}\'"
 
     # Use popen so that thread is not blocked by window message
     if not display and not all_users:
@@ -39,7 +39,7 @@ def _notify(title, message, all_users=False, display=None):
 
 
 # Notify oper using zenity message box. Pop message box to all displays or the user display
-def notify(title, message, all_users=False, display=None):
+def notify_zenity(title, message, all_users=False, display=None):
     cmd = f"zenity --info --text=\'{message}\' --no-wrap --title=\'{title}\'"
 
     if not display and not all_users:

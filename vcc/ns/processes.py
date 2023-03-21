@@ -1,9 +1,11 @@
+import json
 import shutil
 from threading import Thread
 import logging
 import re
 import os
 from datetime import datetime
+from subprocess import Popen
 
 from vcc import settings, make_path
 from vcc.session import Session
@@ -15,14 +17,16 @@ from vcc.ns import notify
 logger = logging.getLogger('vcc')
 
 
-def notify_all(title, message):
+def notify_all(title, sessions):
     try:
-        notify(title, message, all_users=True)
-    except Exception:
+        json.dumps(sessions)
+        notify(title, json.dumps(sessions), option='-m', all_users=True)
+    except:
         logger.warning('could not notify oper')
     try:
+        message = '\n'.join([f'{Session(ses)} --- {ses["status"]}' for ses in sessions])
         mail_it(title, message)
-    except Exception:
+    except:
         logger.warning('could not sent email')
 
     return None
@@ -38,29 +42,17 @@ class ProcessMaster(Thread):
     def run(self):
         logger.debug('star processing master')
 
-        message = ['List of sessions', '-'*16] if self.data else []
+        sessions = []
         # Get session information
         api = self.vcc.get_api()
         for ses_id, status in self.data.items():
             rsp = api.get(f'/sessions/{ses_id}')
             if rsp:
-                session = Session(rsp.json())
-                message.append(f'{session} --- {status}!')
+                sessions.append(dict(**rsp.json(), **{'status': status}))
+        notify_all(f'List of modified sessions for {self.sta_id}', sessions)
 
         # Display upcoming sessions
-        message.extend(['', f'List of upcoming sessions for {self.sta_id}', '-'*30])
-        rsp = api.get(f'/sessions/next/{self.sta_id}', params={'days': 14})
-        if rsp:
-            index, now = 1, datetime.utcnow()
-            for data in rsp.json():
-                session = Session(data)
-                if session.start > now:
-                    message.append(f'{index:2d} {session}')
-                    index += 1
-
-        notify_all('Master has changed', '<br>'.join(message))
-
-        logger.debug('end processing master')
+        Popen(["vcc-ns next"], shell=True, stdin=None, stdout=None, stderr=None, close_fds=True)
 
 
 class ProcessSchedule(Thread):
