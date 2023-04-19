@@ -52,7 +52,7 @@ def main():
 
     if args.version:
         show_version()
-    if args.viewer:
+    elif args.viewer:
         upcoming(master=args.viewer)  # SessionPicker(args.viewer).exec()
     elif args.sked:
         upload_schedule_files(args.sked) if settings.check_privilege('OC') else \
