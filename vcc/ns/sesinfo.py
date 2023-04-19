@@ -20,7 +20,7 @@ class SessionInformation:
 
     def __init__(self):
         parser = self.make_parser()
-        parser.add_argument('action', choices=['missed', 'issue', 'warm', 'fmout-gps', 'gps-fmout', 'late'],
+        parser.add_argument('action', choices=['missed', 'issue', 'warm', 'fmout-gps', 'gps-fmout', 'late', 'urgent'],
                             type=str.lower, nargs='?')
 
         settings.init(parser.parse_known_args()[0])
@@ -86,6 +86,13 @@ class SessionInformation:
         args = parser.parse_args()
         return [" ".join(args.comments)]
 
+    def process_urgent(self):
+        parser = self.make_parser()
+        parser.add_argument('comments', nargs='*')
+
+        args = parser.parse_args()
+        return [' '.join(args.comments)]
+
     def process_late(self):
         parser = self.make_parser()
         parser.add_argument('time')
@@ -111,7 +118,7 @@ class SessionInformation:
     def make_parser(self):
         parser = argparse.ArgumentParser(description='ses-info')
         parser.add_argument('-c', '--config', help='config file', required=False)
-        parser.add_argument('-s', '--summary' , help='print summary', action='store_true')
+        parser.add_argument('-s', '--summary', help='print summary', action='store_true')
         parser.add_argument('session', help='session code')
         if self.action:
             parser.add_argument('action', choices=[self.action], help=argparse.SUPPRESS, type=str.lower)

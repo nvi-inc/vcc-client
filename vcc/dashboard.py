@@ -35,6 +35,20 @@ class Inbox(threading.Thread):
         self.rmq_client.acknowledge_msg()  # Always acknowledge message
 
 
+class Urgent(Toplevel):
+
+    def __init__(self, root, title, message):
+        super().__init__(root)
+
+        self.title(title)
+        box = scrolledtext.ScrolledText(self)
+        box.pack(expand=TRUE, fill=BOTH)
+        box.configure(state='normal')
+        box.insert(END, f'{message}\n')
+        box.configure(state='disabled')
+        self.geometry("400x100")
+
+
 # Class to display SEFD for specific station
 class SEFDViewer:
     def __init__(self, app, data):
@@ -340,6 +354,8 @@ class Dashboard:
             text = data['status']
             if 'ses-info' in text:
                 text = text.replace('ses-info:', '').replace(data['session'], '').replace(',,', ',')
+            if 'urgent' in text:
+                Urgent(self.root, f'URGENT message from {sta_id}', text.replace('urgent:', ''))
             text = text[1:] if text.startswith(',') else text
             if 'scan_name' in text:
                 self.update_scan(sta_id, utc, text)
@@ -367,9 +383,9 @@ class Dashboard:
     def process_master(self, headers, data):
         status = data.get(self.session.code.upper(), None)
         if status == 'cancelled':
-            messagebox.showerror(self.session.code, f'{self.session.code} has been cancelled')
+            Urgent(self.root, 'Message from VCC', f'{self.session.code} has been cancelled')
         elif status == 'updated':
-            messagebox.showinfo(self.session.code, f'{self.session.code} was updated\nYpu should restart Dashboard')
+            Urgent(self.root, 'Message from VCC', f'{self.session.code} was updated\nYou should restart Dashboard')
 
     def process_schedule(self, headers, data):
         threading.Thread(target=self.get_schedule).start()
