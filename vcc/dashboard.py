@@ -1,575 +1,432 @@
-import sys
-from datetime import datetime
-from functools import partial
-from subprocess import Popen, PIPE
 import json
-import traceback
 import math
+import sys
+from datetime import datetime, timedelta
+import threading
+import queue
 
-from PyQt5.QtGui import QFont, QCursor
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QMainWindow, QApplication, QWidget, QLayout, QLineEdit
-from PyQt5.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout, QPushButton, QPlainTextEdit
+from tkinter import *
+from tkinter import ttk, scrolledtext, messagebox
 
-from vcc import settings, json_decoder, VCCError
-from vcc.session import Session
+from vcc import settings, VCCError, json_decoder, groups
 from vcc.server import VCC
-
-from vcc.processes import Timer, Get, MultiGet, ErrorMessage, make_text_box
-from vcc.messenger import Messenger
-from vcc.windows import StationMessage, SEFDs
+from vcc.session import Session
+from vcc.messaging import RMQclientException
 
 
-class StatusWidget(QLineEdit):
+class Inbox(threading.Thread):
 
-    def __init__(self, sta_id):
+    def __init__(self, ses_id, vcc, messages):
         super().__init__()
-        self.sta_id = sta_id
-        self.setReadOnly(True)
-        self.lines = [f'{datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")} - start log for {sta_id}']
-        self.viewer = None
-        self.setCursor(QCursor(Qt.PointingHandCursor))
 
-    def mousePressEvent(self, event):
-        if self.viewer:
-            self.viewer.setPlainText('\n'.join(self.lines))
-        else:
-            self.viewer = QPlainTextEdit()
-            #self.viewer.setFont(QFont('default_families', 9))  # monospace
-            #f = QFontDatabase.FixedFont()
-            self.viewer.setFont(QFont('Arial', 9))  # monospace
-            self.viewer.setMinimumWidth(450)
-            self.viewer.setWindowTitle(f'{self.sta_id} - events')
-            self.viewer.setPlainText('\n'.join(self.lines))
-            self.viewer.closeEvent = self.viewerCloseEvent
-            self.viewer.show()
+        self.rmq_client, self.messages = vcc.get_rmq_client(ses_id), messages
 
-    def clean(self):
-        if self.viewer:
-            self.viewer.close()
+    def run(self):
+        try:
+            self.rmq_client.monit(self.process_message)
+        except RMQclientException as exc:
+            pass
 
-    def add_text(self, utc, text):
-        record = f'{utc.strftime("%Y-%m-%d %H:%M:%S - ")}{text}'
-        self.lines.append(record)
-        if self.viewer:
-            self.viewer.appendPlainText(record)
+    def stop(self):
+        self.rmq_client.close()
 
-    def viewerCloseEvent(self, event):
-        self.viewer = None
-
-    def setText(self, text, log_only=False):
-        now = datetime.utcnow()
-        self.add_text(now, text)
-        if not log_only:
-            super().setText(f'{now.strftime("%H:%M:%S - ")}{text}')
+    def process_message(self, headers, data):
+        self.messages.put((headers, data))  # Send message to dashboard
+        self.rmq_client.acknowledge_msg()  # Always acknowledge message
 
 
-# Class for dashboard application
-class Dashboard(QMainWindow):
+# Class to display SEFD for specific station
+class SEFDViewer:
+    def __init__(self, app, data):
+        self.app, self.data, self.top = app, data, None
+
+    def show(self):
+        if not self.top:
+            self.top = Toplevel(self.app.root, padx=10, pady=10)
+            self.top.title(f'SEFD {self.data["sta_id"]}')
+            self.init_observed()
+            self.init_detectors()
+            self.top.geometry("420x500")
+            self.top.protocol("WM_DELETE_WINDOW", self.done)
+
+        self.top.focus()
+
+    def init_observed(self):
+        frame = LabelFrame(self.top, text='Observed', padx=5, pady=5)
+        # Reason label and OptionMenu
+        Label(frame, text=f'Source: {self.data["source"]}',
+              anchor='w').grid(row=0, column=0, padx=5, pady=5, sticky='ew')
+        Label(frame, text=f'Az: {self.data["azimuth"]}').grid(row=0, column=1, padx=5, pady=5, sticky='ew')
+        Label(frame, text=f'El: {self.data["elevation"]}').grid(row=0, column=2, padx=5, pady=5, sticky='ew')
+        Label(frame, text=f'{self.data["observed"]:%Y-%m-%d %H:%M}',
+              anchor='e').grid(row=0, column=3, padx=5, pady=5, sticky='we')
+        for col in range(4):
+            frame.columnconfigure(col, weight=1)
+        frame.pack(expand=NO, fill=BOTH)
+
+    def init_detectors(self):
+        header = {'De': (50, W, NO), 'I': (20, CENTER, NO), 'P': (20, CENTER, NO), 'Freq': (75, E, NO),
+                  'TSYS': (75, E, NO), 'SEFD': (75, E, YES)}
+        width, height = sum([info[0] for info in header.values()]), 150
+        frame = LabelFrame(self.top, text='Detectors', height=height, width=width + 20, padx=5, pady=5)
+        # Add a Treeview widget
+        tree = ttk.Treeview(frame, column=list(header.keys()), show='headings', height=15)
+        tree.place(width=width, height=height)
+        names = ['device', 'input', 'polarization', 'frequency', 'tsys', 'sefd']
+        for info in self.data['detectors']:
+            tree.insert('', 'end', info['device'], values=[info[name] for name in names])
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        vsb.place(width=20, height=height)
+        vsb.pack(side='right', fill='y')
+        tree.configure(yscrollcommand=vsb.set)
+        tree.tag_configure('cancelled', background="red")
+
+        for col, (key, info) in enumerate(header.items(), 0):
+            tree.column(f"{col}", anchor=info[1], minwidth=0, width=info[0], stretch=info[2])
+            tree.heading(f"{col}", text=key)
+        tree.pack(expand=YES, fill=BOTH)
+        frame.pack(expand=YES, fill=BOTH)
+
+    def done(self):
+        self.top.destroy()
+        self.top = None
+
+
+class StationLog:
+    def __init__(self, app, sta_id):
+        self.app, self.sta_id, self.top = app, sta_id, None
+        self.box, self.text = None, StringVar()
+        self.data = []
+
+    def show(self):
+        if not self.top:
+            self.top = Toplevel(self.app.root, padx=10, pady=10)
+            self.top.title(f'{self.sta_id} - events')
+            self.box = scrolledtext.ScrolledText(self.top, font=("TkFixedFont",))
+            self.box.pack(expand=TRUE, fill=BOTH)
+            self.box.configure(state='disabled')
+            self.top.geometry("650x200")
+            self.top.protocol("WM_DELETE_WINDOW", self.done)
+            for utc, text in self.data:
+                self.insert(utc, text)
+        self.top.focus()
+
+    def done(self):
+        self.top.destroy()
+        self.top = None
+
+    def insert(self, utc, text):
+        self.box.configure(state='normal')
+        self.box.insert(END, f'{utc:%Y-%m-%d %H:%M:%S} - {text}\n')
+        self.box.configure(state='disabled')
+
+    def add(self, utc, text):
+        self.data.append((utc, text))
+        if self.top:
+            self.insert(utc, text)
+
+
+# Dashboard displaying session activities.
+class Dashboard:
 
     def __init__(self, ses_id):
-
-        self.full_name = 'VLBI dashboard V0.1'
         self.vcc = VCC('DB')
-
-        self.app = QApplication(sys.argv)
-
-        self.network, self.sefds = [], {}
-        self.timer = None
-
+        self.api = self.vcc.get_api()
         self.session = self.get_session(ses_id)
+        self.root = Tk()
+        self.root.protocol("WM_DELETE_WINDOW", self.done)
+        self.network, self.start, self.status_text, self.schedule = StringVar(), StringVar(), StringVar(), StringVar()
+        self.utc = StringVar()
 
-        self.network = self.session.network
-        self.station_scans = {}
-        self.messenger = None
-        self._get_ses = self._get_skd = self._after_get_schedule = None
-        self._sefd_request = None
+        self.network.set(self.session.network)
+        self.start.set(f'{self.session.start:%Y-%m-%d %H:%M}')
+        self.status = self.st_label = None
+        self.stations = None
+        self.timer = None  # Timer(self.utc, self.update_status)
+        self.stopped = threading.Event()
+        self.sefds = {}
+        self.messages = queue.Queue()
+        self.inbox = Inbox(ses_id, self.vcc, self.messages)
+        self.logs = {sta_id: StationLog(self, sta_id) for sta_id in self.session.network}
+        self.scans = {}
 
-        super().__init__()
+    def init_wnd(self):
+        # Set the size of the tkinter window
+        self.root.title(f'VLBI Dashboard V1.0')
 
-        self.setWindowFlags(Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
-        self.setWindowTitle(self.full_name)
-        self.resize(700, 100)
+        style = ttk.Style(self.root)
+        style.theme_use('clam')
+        style.map('W.Treeview', background=[('selected', 'white')], foreground=[('selected', 'black')])
+        # Add a frame for TreeView
+        main_frame = Frame(self.root, padx=5, pady=5)
+        width = max(750, self.init_session(main_frame).winfo_reqwidth())
+        width = max(width, self.init_stations(main_frame).winfo_reqwidth())
+        width = max(width, self.init_done(main_frame).winfo_reqwidth())
+        main_frame.pack(expand=YES, fill=BOTH)
+        self.root.geometry(f"{width}x330")
 
-        # Make Application layout
-        self.utc_display = QLabel('')
-        self.station_box = QLabel()
-        self.start_box = make_text_box(self.session.start.strftime('%Y-%m-%d %H:%M'))
-        self.start_status = QLabel('')
-        self.version_box = make_text_box(self.session.sched_version, fit=False)
-        self.messages = make_text_box('Not monitoring', fit=False)
+    def init_session(self, main_frame):
+        frame = LabelFrame(main_frame, text=self.session.code.upper(), padx=5, pady=5)
+        # Reason label and OptionMenu
+        Label(frame, text="Network", anchor='w').grid(row=0, column=0, padx=10, pady=5)
+        Label(frame, textvariable=self.network, borderwidth=2, relief="sunken"
+              , anchor='w').grid(row=0, column=1, columnspan=5, padx=5, pady=5, sticky='we')
+        Label(frame, text="Start time", anchor='w').grid(row=1, column=0, padx=5, pady=5)
+        self.st_label = Label(frame, textvariable=self.start, anchor='w', relief='sunken')
+        self.st_label.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky='we')
+        self.status = Label(frame, textvariable=self.status_text, anchor='w', relief='sunken')
+        self.status.grid(row=1, column=4, columnspan=2, padx=5, pady=5, sticky='we')
+        Label(frame, text="Schedule", anchor='w').grid(row=2, column=0, padx=5, pady=5)
+        Label(frame, textvariable=self.schedule, anchor='w', relief='sunken'
+              ).grid(row=2, column=1, columnspan=3, padx=5, pady=5, sticky='we')
+        for col in range(5):
+            frame.columnconfigure(col, uniform='a')
 
-        widget = QWidget()
-        self.Vlayout = QVBoxLayout()
-        self.Vlayout.addLayout(self.make_session_box())
-        self.Vlayout.addLayout(self.make_monit_box())
-        self.Vlayout.addLayout(self.make_footer_box())
-        widget.setLayout(self.Vlayout)
-        self.setCentralWidget(widget)
+        frame.columnconfigure(5, weight=1)
+        frame.pack(expand=NO, fill=BOTH)
+        return frame
 
-        self.init_pos()
-        self.show()
-        self.start()
+    def station_clicked(self, event):
+        row, col = self.stations.identify_row(event.y), self.stations.identify_column(event.x)
+        if row:
+            if col == '#3' and self.sefds.get(row):
+                self.sefds[row].show()
+            elif col == '#5':
+                self.logs[row].show()
 
-    # Start application timer and messenger for message monitoring
-    def start(self):
-        # Start timer to update information
-        self.timer = Timer(self.on_timer)
-        self.timer.start()
+    def init_stations(self, main_frame):
+        header = {'Station': (75, W, NO), 'Schedule': (100, CENTER, NO), 'SEFD': (150, CENTER, NO),
+                  'Scans': (100, E, NO), 'Status': (300, W, YES)}
+        width, height = sum([info[0] for info in header.values()]), 150
+        frame = Frame(main_frame, height=height, width=width+20)
+        # Add a Treeview widget
+        self.stations = ttk.Treeview(frame, column=list(header.keys()), show='headings', height=5, style='W.Treeview')
+        self.stations.place(width=width, height=height)
 
-        # Request schedule and request SEFDs after
-        self.get_schedule(self.get_sefds)
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self.stations.yview)
+        vsb.place(width=20, height=height)
+        vsb.pack(side='right', fill='y')
+        self.stations.configure(yscrollcommand=vsb.set)
+        self.stations.tag_configure('cancelled', background="red")
 
-        # Start messenger
-        try:
-            self.messenger = Messenger(self.vcc, self.process_messages, ses_id=self.session.code)
-            self.messenger.start()
-        except Exception as exc:
-            ErrorMessage(self.full_name, f'Could not start messenger\n{str(exc)}')
+        for col, (key, info) in enumerate(header.items(), 0):
+            self.stations.column(f"{col}", anchor=info[1], minwidth=0, width=info[0], stretch=info[2])
+            self.stations.heading(f"{col}", text=key)
 
-    # Set initial position for interface
-    def init_pos(self):
-        if hasattr(settings, 'Positions'):
-            self.move(settings.Positions.x, settings.Positions.y)
+        for sta in self.session.network:
+            self.stations.insert('', 'end', sta.capitalize(), values=(sta.capitalize(), 'None', 'N/A'), tags=('all',))
+        self.stations.tag_configure('all', background='white')
+        self.stations.bind('<ButtonRelease-1>', self.station_clicked)
+        self.stations.pack(expand=YES, fill=BOTH)
+        frame.pack(expand=YES, fill=BOTH)
+        return frame
+
+    def init_done(self, main_frame):
+        frame = Frame(main_frame, padx=5, pady=5)
+        button = Button(frame, text="Done", command=self.done)
+        button.pack(side=LEFT)
+        Label(frame, textvariable=self.utc, anchor='e', font=("TkFixedFont",)).pack(side=RIGHT)
+        frame.configure(height=button.winfo_reqheight()+10)
+        frame.pack(expand=NO, fill=BOTH)
+        return frame
+
+    def update_status(self, utc):
+        status = self.session.get_status()
+        if status == 'waiting':
+            dt = (self.session.start - utc).total_seconds()
+            if dt > 3600:
+                hours, minutes = divmod(int(dt / 60), 60)
+                text = f'Starting in {hours:d} hour{"s" if hours > 1 else ""} and {minutes:02d} minutes'
+            elif dt > 60:
+                minutes = math.ceil(dt / 60)
+                text = f'Starting in {minutes:d} minute{"s" if minutes > 1 else ""}'
+            else:
+                seconds = math.ceil(dt)
+                s = 's' if seconds > 1 else ''
+                text = f'Starting in {seconds:02d} second{"s" if seconds > 1 else ""}'
+
+            color = 'black' if dt > 600 else 'red'
+        else:
+            color, text = 'black', status.capitalize()
+        self.status_text.set(text)
+        self.status.configure(fg=color)
 
     def get_session(self, ses_id):
-        try:
-            rsp = self.vcc.get_api().get(f'/sessions/{ses_id}')
+        for n in range(3):
+            try:
+                rsp = self.api.get(f'/sessions/{ses_id}')
+            except VCCError as exc:
+                continue
             if not rsp:
                 raise VCCError(f'{ses_id} not found')
             return Session(json_decoder(rsp.json()))
-        except VCCError as exc:
-            ErrorMessage(self.full_name, str(exc), critical=True)
+
+    def get_sefds(self, sta_id):
+        for n in range(3):
+            try:
+                rsp = self.api.get(f'/data/onoff/{sta_id}')
+                if rsp:
+                    data = json_decoder(rsp.json())
+                    self.sefds[sta_id] = SEFDViewer(self, data)
+                    self.stations.set(sta_id.capitalize(), '#3', f'{data["observed"]:%Y-%m-%d %H:%M}')
+                break
+            except VCCError:
+                pass
+
+    def get_schedule(self):
+        for n in range(3):
+            try:
+                rsp = self.api.get(f'/schedules/{self.session.code.lower()}', params={'select': 'summary'})
+                if rsp:
+                    data = json_decoder(rsp.json())
+                    self.session.update_schedule(data)
+                    self.schedule.set(self.session.sched_version)
+                    self.scans = {info['station']: {'last': 0, 'total': info['nbr_scans'], 'list': set()}
+                                  for info in self.session.schedule.scheduled}
+                    for sta_id, nbr in self.scans.items():
+                        self.update_station_info(sta_id, '#4', f'{nbr["last"]}/{nbr["total"]}')
+
+                break
+            except VCCError:
+                pass
+
+    def done(self):
+        try:
+            self.inbox.stop()
+            self.inbox.join()
+            self.root.destroy()
+        except Exception as exc:
             sys.exit(0)
 
-    # Make footer with buttons and timer
-    def make_footer_box(self):
-        hbox = QHBoxLayout()
-        # Add Done button
-        cancel = QPushButton("Done")
-        cancel.clicked.connect(self.close)
-        hbox.addWidget(cancel)
-        hbox.addStretch(1)
-        # Add a display for UTC time
-        hbox.addWidget(self.utc_display)
-        hbox.setContentsMargins(10, 5, 15, 5)
-        hbox.setSizeConstraint(QLayout.SetNoConstraint)
-        return hbox
+    def run_timer(self):
+        waiting_time = 1.0 - datetime.utcnow().timestamp() % 1
+        try:
+            while not self.stopped.is_set():
+                dt = datetime.utcnow().timestamp() % 1
+                waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
+                threading.Event().wait(waiting_time)
+                utc = datetime.utcnow()
+                self.utc.set(f'{utc:%Y-%m-%d %H:%M:%S} UTC')
+                self.update_status(utc)
+        except Exception as exc:
+            print('timer loop failed', str(exc))
 
-    # Make box displaying session information
-    def make_session_box(self):
-        groupbox = QGroupBox(self.session.code.upper())
-        groupbox.setStyleSheet("QGroupBox { font-weight: bold; } ")
+    def update_clock(self):
+        utc = datetime.utcnow()
+        self.utc.set(f'{utc:%Y-%m-%d %H:%M:%S} UTC')
+        self.update_status(utc)
+        dt = datetime.utcnow().timestamp() % 1
+        waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
+        self.root.after(int(waiting_time*1000), self.update_clock)
 
-        box = QGridLayout()
-        box.addWidget(QLabel('Stations'), 0, 0)
+    def update_station_info(self, sta_id, col, text):
+        self.stations.set(sta_id, col, text)
 
-        self.station_box.setStyleSheet("border: 1px solid grey;padding :3px;border-radius : 2;background-color: white")
-        self.update_station_box()
-        box.addWidget(self.station_box, 0, 1, 1, 5)
-
-        box.addWidget(QLabel('Start time'), 1, 0)
-        box.addWidget(self.start_box, 1, 1, 1, 2)
-
-        box.addWidget(self.start_status, 1, 3, 1, 3)
-
-        box.addWidget(QLabel('Schedule'), 2, 0)
-        box.addWidget(self.version_box, 2, 1, 1, 2)
-        #box.addWidget(QPushButton('Make SKD'), 2, 5)
-
-        groupbox.setLayout(box)
-        grid = QGridLayout()
-        grid.addWidget(groupbox)
-
-        return grid
-
-    # Update information in station box using red for not schedule stations
-    def update_station_box(self):
-        scheduled = sorted(self.session.schedule.observing if self.session.schedule else self.session.network)
-        removed = sorted([sta for sta in self.session.network if sta not in scheduled])
-        txt = "<font color='black'>{}{}</font>".format(', '.join(scheduled), ', ' if removed else '')
-        if removed:
-            txt += "<font color='red'>{}</font>".format(', '.join(removed))
-        self.station_box.setText(txt)
-
-    # Update session box with schedule version
-    def update_session_box(self):
-        self.update_station_box()
-        self.start_box.setText(self.session.start.strftime('%Y-%m-%d %H:%M'))
-        self.version_box.setText(self.session.sched_version)
-
-    # Process urgent message sent by a station
-    def process_urgent(self, headers, data):
-        sta_id = data.get('station', headers.get('sender', None))
-        if sta_id and (sta_id.capitalize() in self.network):
-            sta_id = sta_id.capitalize()
-            for line in data['msg'].splitlines():
-                self.update_station_log(sta_id, f'URGENT: {line}')
-            StationMessage(self, headers, data)
-
-    # Process master message send by the Operation centeer
-    def process_master(self, headers, data):
-        if data['session'].upper() == self.session.code:
-            self.update_session()
-
-    # Process schedule message indicating that new schedule is available
-    def process_schedule(self, headers, data):
-        self.get_schedule()
-
-    # Process messages received from stations
     def process_sta_info(self, headers, data):
         sta_id = data.get('station', None)
         sta_id = sta_id.capitalize() if sta_id else headers.get('sender', '__').capitalize()
 
         ses_id = data.get('session', None)
         ses_id = ses_id.upper() if ses_id else headers.get('session', '__').upper()
+        utc = datetime.fromisoformat(headers.get('utc', datetime.utcnow()))
 
         # Check if valid station and session id
-        if sta_id not in self.network or (ses_id not in ['__', self.session.code.upper()]):
-            print('DB Msg not process', sta_id, ses_id, self.network)
+        if sta_id not in self.session.network or (ses_id not in ['__', self.session.code.upper()]):
             return
         if 'sefd' in data:
             self.get_sefds(station=sta_id)
+            self.logs.get(sta_id).add(utc, 'new SEFD values')
         elif 'status' in data:
-            self.update_station_info(sta_id, 'Status', data['status'])
-            self.update_scans(sta_id, data)
-        elif 'schedule' in data:
-            self.update_station_info(sta_id, 'Status', f'V{data["version"]} fetched')
-            self.update_station_info(sta_id, 'Sched', f'V{data["version"]}')
-
-    # Process messages received trough the messaging system
-    def process_messages(self, headers, command):
-        # Decode command
-        if headers['format'] == 'json':
-            command = json.loads(command)
-            text = ', '.join([f'{key}={val}' for key, val in command.items()])
-        else:
-            text = command
-        code = headers['code']
-        msg, name = f'{code} {text}', f'process_{code}'
-        self.messages.setText(msg)
-        # Call function for this specific code
-        if hasattr(self, name):
-            getattr(self, name)(headers, command)
-        # Acknowledge message
-        self.messenger.acknowledge_msg()
-
-    # Show the SEFDs in external window
-    def show_sefds(self, sta_id):
-        if sta_id in self.sefds and (sefd := self.sefds[sta_id].get('data', None)):
-            self.sefds[sta_id]['wnd'] = wnd = SEFDs(self, sefd)
-            wnd.show()
-
-    # Local function to make Label
-    def _make_L(self, sta, text):
-        return QLabel(text)
-
-    # Local function to make Label align center
-    def _make_C(self, sta, text):
-        label = QLabel(text)
-        label.setAlignment(Qt.AlignCenter)
-        return label
-
-    # Local function to make a Text box
-    def _make_T(self, sta, text):
-        return StatusWidget(sta)
-
-    # Local function to make PushButton with specific text
-    def _make_B(self, sta, text):
-        widget = QPushButton()
-        widget.clicked.connect(partial(self.show_sefds, sta_id=sta))
-        return widget
-
-    # Add a row with many widget to display station information
-    def add_station_row(self, row, sta):
-        for key, info in self.header.items():
-            txt = sta.capitalize() if key == 'Station' else ''
-            widget = getattr(self, f'_make_{info[0]}')(sta, txt)
-            self.station_info.addWidget(widget, row, info[1], 1, info[2])
-
-    # Make the box that will be use to display information from stations
-    def make_monit_box(self):
-
-        self.station_info = QGridLayout()
-        self.header = {'Station': ('L',0,1), 'Sched': ('L',1,1), 'SEFD': ('B',2,2), 'Scans': ('C',5,1), 'Status': ('T',6,4)}
-        for label, info in self.header.items():
-            self.station_info.addWidget(QLabel(label), 0, info[1])
-
-        for row, sta in enumerate(self.session.network, 1):
-            self.add_station_row(row, sta)
-
-        groupbox = QGroupBox('Station Monitoring')
-        groupbox.setStyleSheet("QGroupBox { font-weight: bold; } ")
-        groupbox.setLayout(self.station_info)
-
-        grid = QGridLayout()
-        grid.addWidget(groupbox)
-        return grid
-
-    # Update a widget in a row
-    def update_widget(self, row, col_name, text):
-        #col = self.header[col_name][1]
-        #self.station_info.itemAtPosition(row,col).widget().setText(text)
-        self.get_widget(row, col_name).setText(text)
-
-    # Update a widget in a row
-    def get_widget_text(self, row, col_name):
-        #col = self.header[col_name][1]
-        #return self.station_info.itemAtPosition(row,col).widget().text()
-        return self.get_widget(row, col_name).text()
-
-    # Update a widget in a row
-    def get_widget(self, row, col_name):
-        col = self.header[col_name][1]
-        item = self.station_info.itemAtPosition(row,col)
-        return item.widget() if item else None
-
-    # Get the rows associated with stations
-    def get_station_list(self):
-        stations = {}
-        for row in range(1, self.station_info.rowCount()):
-            if item := self.station_info.itemAtPosition(row,0):
-                stations[item.widget().text()] = row
-        return stations
-
-    # Clean the box with station information
-    def clean_monit_box(self, sched=False):
-        # Reset monit information
-        for row in range(len(self.network)+1, self.station_info.rowCount()):
-            self.remove_monit_row(row)
-        # Add new stations
-        for row in range(self.station_info.rowCount()-1, len(self.network)):
-            self.add_station_row(row+1, self.network[row])
-        for row, info in enumerate(self.network, 1):
-            sta, data = (info.capitalize(), None) if isinstance(info, str) else (info['sta'].capitalize(), info)
-            self.update_monit_row(row, sta, data)
-
-    # Check if a row has data
-    def row_has_data(self, row):
-        return bool(self.station_info.itemAtPosition(row,0))
-
-    # Update station information
-    def update_station_info(self, sta_id, col_name, text):
-        for row in range(1, self.station_info.rowCount()):
-            if item := self.station_info.itemAtPosition(row,0):
-                if sta_id == item.widget().text():
-                    self.update_widget(row, col_name, text)
-                    return
-
-    # Update station information
-    def update_station_log(self, sta_id, text):
-        for row in range(1, self.station_info.rowCount()):
-            if item := self.station_info.itemAtPosition(row, 0):
-                if sta_id == item.widget().text():
-                    widget = self.get_widget(row, 'Status')
-                    widget.setText(text, True)
-                    return
-
-    # Update station information
-    def update_scans(self, sta_id, data):
-        if 'scan_id' in data:
-            for row in range(1, self.station_info.rowCount()):
-                if item := self.station_info.itemAtPosition(row,0):
-                    if sta_id == item.widget().text():
-                        self.update_widget(row, 'Scans', f'{data["scan_id"]}/{self.station_scans[sta_id]}')
-                        return
-
-    # Remove row from stations
-    def remove_monit_row(self, row):
-        for col in range(self.station_info.columnCount()):
-            if layout := self.station_info.itemAtPosition(row,col):
-                layout.widget().deleteLater()
-                self.station_info.removeItem(layout)
-
-    # Start scheduler to make a new schedule
-    def show_scheduler(self):
-        command = f'{settings.Scripts.scheduler} {self.session.code}'
-        prc = Popen(command, shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE)
-        prc.communicate()
-
-    # Update a row in the monit box
-    def update_monit_row(self, row, sta, data):
-        if not self.row_has_data(row):
-            self.add_station_row(row, sta)
-
-        self.update_widget(row, 'Station', sta)
-
-        version = f'V{data["version"]}' if data and data['version'] else self.get_widget_text(row, 'Sched')
-        self.update_widget(row, 'Sched', version if version else 'None')
-        if data and 'nbr_scans' in data:
-            self.station_scans[sta] = str(data['nbr_scans'])
-            self.update_widget(row, 'Scans', str(data['nbr_scans']))
-        if sta not in self.sefds:
-            self.sefds[sta] = {'wnd': None , 'data': None}
-        sefd = self.sefds[sta]['data']
-        self.update_widget(row, 'SEFD', datetime.fromisoformat(sefd['observed']).strftime('%Y-%m-%d %H:%M') if sefd else 'No data')
-
-    # Update the monit box
-    def update_monit_box(self):
-        network = self.session.schedule.scheduled if self.session.schedule else self.network
-        rows = self.get_station_list()  # Get row for each stations
-        for info in network:
-            sta, data = (info.capitalize(), None) if isinstance(info, str) else (info['station'].capitalize(), info)
-            if row := rows.get(sta, 0):
-                self.update_monit_row(row, sta, data)
-
-    # Update the text in the status box and icon
-    def update_start_status(self):
-        status = self.session.get_status()
-        if status == 'waiting':
-            dt = (self.session.start - datetime.utcnow()).total_seconds()
-            if dt > 3600:
-                hours, minutes = divmod(int(dt / 60), 60)
-                dt_text = f'Starting in {hours:d} hour{"s" if hours > 1 else ""} and {minutes:02d} minutes'
-            elif dt > 60:
-                minutes = math.ceil(dt / 60)
-                dt_text = f'Starting in {minutes:d} minute{"s" if minutes > 1 else ""}'
+            text = data['status']
+            if 'ses-info' in text:
+                text = text.replace('ses-info:', '').replace(data['session'], '').replace(',,', ',')
+            text = text[1:] if text.startswith(',') else text
+            if 'scan_name' in text:
+                self.update_scan(sta_id, utc, text)
             else:
-                seconds = math.ceil(dt)
-                s = 's' if seconds > 1 else ''
-                dt_text = f'Starting in {seconds:02d} second{"s" if seconds > 1 else ""}'
+                self.logs.get(sta_id).add(utc, text)
+                self.update_station_info(sta_id, '#5', text)
+        elif 'schedule' in data:
+            text = f'V{data["version"]} fetched'
+            self.logs.get(sta_id).add(utc, text)
+            self.update_station_info(sta_id, '#5', text)
+            self.update_station_info(sta_id, '#2', f'V{data["version"]}')
 
-            color = 'black' if dt > 600 else 'red'
-            text = "<font color='{}'>{}</font>".format(color, dt_text)
-        else:
-            text = "<font color='{}'>{}</font>".format('black', status.capitalize())
+    def update_scan(self, sta_id, utc, text):
+        scan_name = text.split('=')[-1]
+        if sta_id not in self.scans:
+            self.scans[sta_id] = {'last': 0, 'total': '?????', 'list': set()}
+        scans = self.scans.get(sta_id)
+        if scan_name not in scans['list']:
+            scans['list'].add(scan_name)
+            scans['last'] += 1
+            self.update_station_info(sta_id, '#4', f'{scans["last"]}/{scans["total"]}')
+            self.logs.get(sta_id).add(utc, text)
+            self.update_station_info(sta_id, '#5', text)
 
-        self.start_status.setText(text)
+    def process_master(self, headers, data):
+        status = data.get(self.session.code.upper(), None)
+        if status == 'cancelled':
+            messagebox.showerror(self.session.code, f'{self.session.code} has been cancelled')
+        elif status == 'updated':
+            messagebox.showinfo(self.session.code, f'{self.session.code} was updated\nYpu should restart Dashboard')
 
-    # Call at end of schedule
-    def update_end_status(self):
-        # done = self.session.waiting_done()
-        # if done > 0:
-        #    self.start_progress.setValue(done)
-        pass
+    def process_schedule(self, headers, data):
+        threading.Thread(target=self.get_schedule).start()
 
-    # Process timer tick
-    def on_timer(self):
-        # Update utc
-        self.utc_display.setText(datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'))
-        self.update_start_status()
-        self.update_end_status()
+    def process_messages(self):
+        while not self.messages.empty():
+            headers, command = self.messages.get()
+            # Decode command
+            if headers['format'] == 'json':
+                command = json.loads(command)
+                text = ', '.join([f'{key}={val}' for key, val in command.items()])
+            else:
+                text = command
+            code = headers['code']
+            msg, name = f'{code} {text}', f'process_{code}'
+            # Call function for this specific code
+            if hasattr(self, name):
+                getattr(self, name)(headers, command)
 
-    # Execute app
+        self.root.after(100, self.process_messages)
+
     def exec(self):
-        sys.exit(self.app.exec_())
+        self.init_wnd()
+        threading.Thread(target=self.get_schedule).start()
+        for sta_id in self.session.network:
+            threading.Thread(target=self.get_sefds, args=(sta_id,)).start()
+        self.inbox.start()
+        dt = datetime.utcnow().timestamp() % 1
+        waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
+        self.root.after(int(waiting_time*1000), self.update_clock)
+        self.root.after(100, self.process_messages)
+        self.root.mainloop()
 
-    # Called when window is closing
-    def closeEvent(self, event):
-        for row in range(1, self.station_info.rowCount()):
-            if widget := self.get_widget(row, 'Status'):
-                widget.clean()
-        try:
-            print('Close messenger')
-            self.messenger.stop()
-            print('Close timer')
-            self.timer.stop()
-            print('Closed ok')
-        except Exception as err:
-            print('Closed with problem')
-            print(str(err))
-            print(traceback.format_exc())
 
-    #
-    def msg_received(self, ch, method, properties, body):
-        # close connection on receiving stop message
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-
-    def update_session(self):
-        self._get_ses = Get(self.vcc, f'/sessions/{self.session.code}')
-        self._get_ses.on_finish(self.session.code, self.process_session_response)
-        self._get_ses.start()
-
-    def get_schedule(self, next=None):
-        self._after_get_schedule = next
-        self._get_skd = Get(self.vcc, f'/schedules/{self.session.code.lower()}', params={'select': 'summary'})
-        self._get_skd.on_finish(self.session.code, self.process_schedule_response)
-        self._get_skd.start()
-
-    def process_session_response(self, ses_id, response, error):
-
-        try:
-            if response:
-                self.session = Session(response.json())
-                self.network = self.session.network
-                self.update_session_box()
-                self.clean_monit_box()
-                self.get_schedule()
-                return
-        except VCCError as exc:
-            error = str(exc)
-
-        reason = error if error else 'Invalid data from VLBI Data Center'
-        failure = f'Error requesting session {ses_id}'
-        ErrorMessage(self.full_name, failure, reason, critical=True)
-
-    # Receive schedule information and update interface
-    def process_schedule_response(self, ses_id, response, error):
-
-        try:
-            if response:
-                sched = response.json()
-                self.session.update_schedule(sched)
-                self.network = self.session.network
-                self.update_session_box()
-                self.clean_monit_box(sched=True)
-                self.update_monit_box()
-            if self._after_get_schedule:
-                self._after_get_schedule()
-        except VCCError:
-            pass
-
-    # Problem requesting schedule
-    def error_sefds(self, error):
-        ErrorMessage('Error requesting SEFD', error)
-
-    # Request SEFDs in multi thread environment
-    def get_sefds(self, station=None):
-        requests, params = [], None
-        if station and station in self.sefds:
-            self.sefds[station]['data'] = None
-
-        for sta_id in [station] if station else self.network:
-            if sta_id not in self.sefds:
-                self.sefds[sta_id] = {'wnd': None , 'data': None}
-            if not self.sefds[sta_id]['data']:
-                action = (sta_id, f'/data/onoff/{sta_id.lower()}', params)
-                requests.append(action)
-
-        # Use MultiGet to request information from VWS
-        if requests:
-            self._sefd_request = MultiGet(self.vcc)
-            self._sefd_request.set_requests(requests, self.process_sefds, self.error_sefds, self.update_monit_box)
-            self._sefd_request.start()
-
-    # Receive SEFDs and update monit box
-    def process_sefds(self, sta_id, response, error):
-        try:
-            if response:
-                self.sefds[sta_id]['data'] = response.json()
-                sefd = self.sefds[sta_id]['data']
-                if sefd:
-                    when = datetime.fromisoformat(sefd['observed']).strftime('%Y-%m-%d %H:%M')
-                    self.update_station_info(sta_id, 'SEFD', when)
-                    self.update_station_log(sta_id, f'uploaded onoff values dated {when}')
-        except VCCError:
-            pass
+def test(value, stop):
+    waiting_time = 1.0 - datetime.utcnow().timestamp() % 1
+    while not stop.wait(waiting_time):
+        utc = datetime.utcnow()
+        value.set(f'{utc:%Y-%m-%d %H:%M:%S} UTC')
+        dt = datetime.utcnow().timestamp() % 1
+        waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
 
 
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Access VCC Dashboard')
+    parser = argparse.ArgumentParser(description='Edit Station downtime')
     parser.add_argument('-c', '--config', help='config file', required=False)
-    parser.add_argument('session', help='session code')
+    parser.add_argument('session', help='station code', nargs='?')
 
     args = settings.init(parser.parse_args())
 
-    Dashboard(args.session).exec()
-
+    try:
+        Dashboard(args.session).exec()
+    except VCCError as exc:
+        messagebox.showerror(f'{args.session.upper()} failed', str(exc))
 
 if __name__ == '__main__':
 
-    import sys
     sys.exit(main())
-

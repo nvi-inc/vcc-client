@@ -3,10 +3,8 @@ import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget
-from PyQt5.QtWidgets import QPushButton, QGridLayout, QLineEdit, QLabel, QSizePolicy, QCheckBox
-from PyQt5.QtWidgets import QComboBox, QFrame, QMessageBox, QStyle, qApp
-from PyQt5.QtCore import Qt
+from tkinter import *
+from tkinter import ttk, font, messagebox
 
 from vcc import json_decoder, VCCError
 from vcc.server import VCC
@@ -131,218 +129,259 @@ def update_master(lines):
         print(str(exc))
 
 
-# Popup window to display error message with icon.
-def error_message(text, critical=True):
-    msg = QMessageBox()
-    msg.setIcon(QMessageBox.Critical if critical else QMessageBox.Information)
-    msg.setText(text)
+class VCCEntry(Entry):
+    time_format = '%Y-%m-%d %H:%M'
 
-    msg.setGeometry(
-        QStyle.alignedRect(Qt.LeftToRight, Qt.AlignCenter, msg.size(), qApp.desktop().availableGeometry(),))
-    msg.setWindowTitle('Fatal Error')
-    msg.exec_()
+    def __init__(self, frame, text, on_edited=None, width=None):
+        self.value = StringVar()
+        text = text.strftime(self.time_format) if isinstance(text, datetime) else text
+        self.value.set(text)
+        super().__init__(frame, textvariable=self.value, width=width)
+        if on_edited:
+            self.value.trace_variable('w', on_edited)
 
+    def reset(self, state, text):
+        self.value.set(text)
+        self.configure(state=state)
 
-# Create a read-only QLineEdit with size based on length of text
-class TextBox(QLineEdit):
-    def __init__(self, text, readonly=False, parent=None):
-        super().__init__(text, parent)
-        self.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred))
-        self.parent = parent
-        self.setReadOnly(readonly)
+    def get_text(self):
+        return self.value.get()
 
-    def sizeHint(self):
-        if not self.parent:
-            return super().sizeHint()
-        return self.parent.size()
+    def get_datetime(self):
+        try:
+            return datetime.strptime(self.value.get(), self.time_format)
+        except:
+            return None
 
-
-# Class used to draw horizontal separator
-class HSeparator(QFrame):
-    def __init__(self):
-        super().__init__()
-        self.setMinimumWidth(1)
-        self.setFixedHeight(20)
-        self.setFrameShape(QFrame.HLine)
-        self.setFrameShadow(QFrame.Sunken)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+    @property
+    def is_empty(self):
+        return len(self.value.get().strip()) == 0
 
 
-class SessionViewer(QMainWindow):
+class VCCOption(OptionMenu):
+    def __init__(self, frame, options, selected):
+        self.value = StringVar()
+        self.value.set(selected)
+        super().__init__(frame, self.value, *options)
+
+        #f = font.nametofont(self.cget("font"))
+        #self.config(width=int(f.measure(max(options, key=len)) / f.measure("0")) + 1, anchor='w')
+        self.config(width=5, anchor='w')
+
+    def get_text(self):
+        return self.value.get()
+
+    def reset(self, state, text):
+        self.value.set(text)
+        self.configure(state=state)
+
+
+class SessionViewer:
 
     def __init__(self, ses_id):
 
-        super().__init__()
+        self.root, self.vcc = Tk(), VCC('CC')
+        self.is_intensive = BooleanVar()
+        self.type = self.start = self.duration = self.network = None
+        self.operations = self.correlator = self.analysis = None
 
         try:
-            self.vcc = VCC('CC')
-            self.api = self.vcc.get_api()
+            self.session = self.get_session(ses_id)
         except VCCError as exc:
-            error_message(str(exc), critical=True)
-            sys.exit(0)
+            messagebox.showerror('Failed contacting VCC', str(exc))
+            exit(0)
 
-        self.session = self.get_session(ses_id)
-        self.operations = self.make_combobox('/catalog/operations', self.session.operations)
-        self.correlator = self.make_combobox('/catalog/correlator', self.session.correlator)
-        self.analysis = self.make_combobox('/catalog/analysis', self.session.analysis)
-
+        self.oc = self.get_options('/catalog/operations')
+        self.co = self.get_options('/catalog/correlator')
+        self.ac = self.get_options('/catalog/analysis')
         self.stations = self.get_stations()
 
-        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
-        self.setWindowTitle(f'Session {self.session.code}')
+        print(self.session.master, self.session.master == 'intensive')
 
-        widget = QWidget()
-        self.grid = self.make_user_interface()
-        widget.setLayout(self.grid)
-        self.setCentralWidget(widget)
+        self.is_intensive.set(self.session.master == 'intensive')
+        print(self.session.master, self.session.master == 'intensive', self.is_intensive.get())
+        self.init_wnd()
+        self.root.mainloop()
 
-        self.resize(20, 20)
-        self.move(300, 150)
+    def init_wnd(self):
+        # Set the size of the tkinter window
+        self.root.title(f'Session {self.session.code}')
 
-    def closeEvent(self, event):
-        QApplication.quit()
+        style = ttk.Style(self.root)
+        style.theme_use('clam')
+        # Add a frame for TreeView
+        main_frame = Frame(self.root, padx=5, pady=5)
+        frame1 = self.init_session(main_frame)
+        frame2 = self.init_network(main_frame)
+        frame3 = self.init_done(main_frame)
+        main_frame.update()
+        main_frame.pack(expand=YES, fill=BOTH)
+        width = max(700, frame1.winfo_reqwidth() + 10)
+        height = frame1.winfo_reqheight() + frame2.winfo_reqheight() + frame3.winfo_reqheight() + 15
+        self.root.minsize(width, height)
+        self.root.geometry(f"{width}x{height}")
 
-    def make_user_interface(self):
+    def init_session(self, main_frame):
+        frame = LabelFrame(main_frame, text=self.session.code.upper(), padx=5, pady=5)
+        # Reason label and OptionMenu
+        Label(frame, text="Code", anchor='w').grid(row=0, column=0, padx=5, pady=5, sticky='nw')
+        code = VCCEntry(frame, self.session.code)
+        code.grid(row=0, column=1, columnspan=2, padx=5, pady=5, sticky='we')
+        code.reset('disabled', self.session.code)
+        code.configure(disabledbackground="white", disabledforeground="black")
+        Label(frame, text="Type", anchor='w').grid(row=0, column=3, padx=5, pady=5, sticky='we')
+        self.type = VCCEntry(frame, self.session.type)
+        self.type.grid(row=0, column=4, columnspan=2, padx=5, pady=5, sticky='we')
+        Checkbutton(frame, text="Intensive", variable=self.is_intensive).grid(row=0, column=6, columnspan=2,
+                                                                              padx=5, pady=5, sticky='ne')
+        Label(frame, text="Start", anchor='w').grid(row=1, column=0, padx=5, pady=5, sticky='we')
+        self.start = VCCEntry(frame, self.session.start)
+        self.start.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky='we')
+        Label(frame, text="Duration (HH:MM)", anchor='w').grid(row=1, column=3, columnspan=2,
+                                                               padx=5, pady=5, sticky='we')
+        self.duration = VCCEntry(frame, self.session.dur, width=4)
+        self.duration.grid(row=1, column=5, padx=5, pady=5, sticky='e')
+        Label(frame, text="Operations Center", anchor='w').grid(row=2, column=0, columnspan=2,
+                                                                padx=5, pady=5, sticky='w')
+        self.operations = VCCOption(frame, self.oc, self.session.operations)
+        self.operations.grid(row=2, column=2, columnspan=1, padx=5, pady=5, sticky='e')
+        Label(frame, text="Correlator", anchor='w').grid(row=2, column=3, columnspan=1,
+                                                                padx=5, pady=5, sticky='w')
+        self.correlator = VCCOption(frame, self.co, self.session.correlator)
+        self.correlator.grid(row=2, column=4, columnspan=1, padx=5, pady=5, sticky='e')
+        Label(frame, text="Analysis", anchor='w').grid(row=2, column=5, columnspan=1,
+                                                                padx=5, pady=5, sticky='w')
+        self.analysis = VCCOption(frame, self.ac, self.session.analysis)
+        self.analysis.grid(row=2, column=6, columnspan=1, padx=5, pady=5, sticky='e')
 
-        grid = QGridLayout()
+        for col in range(7):
+            frame.columnconfigure(col, uniform='a')
+        frame.columnconfigure(7, weight=1)
+        frame.pack(expand=NO, fill=BOTH)
 
-        grid.addWidget(QLabel("Code"), 0, 0)
-        grid.addWidget(TextBox(self.session.code, readonly=True), 0, 1, 1, 2)
-        grid.addWidget(QLabel("Type"), 0, 3)
-        grid.addWidget(TextBox(self.session.type), 0, 4, 1, 2)
-        is_intensive = QCheckBox("Intensive")
-        is_intensive.setChecked(self.session.master == 'intensive')
-        is_intensive.setLayoutDirection(Qt.RightToLeft)
-        grid.addWidget(is_intensive, 0, 6, 1, 2)
-        grid.addWidget(QLabel("Start"), 1, 0)
-        grid.addWidget(TextBox(self.session.start.strftime('%Y-%m-%d %H:%M')), 1, 1, 1, 2)
-        grid.addWidget(QLabel("Duration (HH:MM)"), 1, 3, 1, 2)
-        grid.addWidget(TextBox(encode_duration(self.session.duration)), 1, 5)
-        grid.addWidget(QLabel("Operations Center"), 2, 0, 1, 2)
-        grid.addWidget(self.operations, 2, 2)
-        grid.addWidget(QLabel("Correlator"), 2, 3)
-        grid.addWidget(self.correlator, 2, 4)
-        grid.addWidget(QLabel("Analysis"), 2, 5)
-        grid.addWidget(self.analysis, 2, 6)
-        grid.addWidget(HSeparator(), 3, 0, 1, 7)
-        grid.addWidget(QLabel("Stations"), 4, 0)
-        grid.addWidget(self.station_list(), 4, 1, 1, 6)
-        grid.addWidget(HSeparator(), 5, 0, 1, 7)
-        button = QPushButton('Quit')
-        button.clicked.connect(self.close)
-        grid.addWidget(button, 6, 0)
-        button = QPushButton('Submit')
-        button.clicked.connect(self.submit)
-        grid.addWidget(button, 6, 6)
+        return frame
 
-        return grid
-
-    def submit(self):
-        def get_text(row, col):
-            return self.grid.itemAtPosition(row, col).widget().text()
-
-        # Check if name is not empty
-        self.session.type = get_text(0, 4).strip()
-        if not self.session.type:
-            error_message('Session type is empty')
-            self.grid.itemAtPosition(0, 4).widget().setFocus()
-            return
-        # Get session type
-        self.session.master = 'intensive' if self.grid.itemAtPosition(0, 6).widget().isChecked() else 'standard'
-        # Check if start time is valid
-        try:
-            self.session.start = datetime.strptime(get_text(1, 1).strip(), '%Y-%m-%d %H:%M')
-            if self.session.start < datetime.utcnow():
-                error_message('Start time in the past')
-                self.grid.itemAtPosition(1, 1).widget().setFocus()
-                return
-        except Exception as exc:
-            error_message(f'Invalid start time [{str(exc)}]')
-            self.grid.itemAtPosition(1, 1).widget().setFocus()
-            return
-        # Check if duration is at least 1 minute
-        self.session.duration = decode_duration(get_text(1, 5))
-        if self.session.duration < 60:
-            error_message(f'Duration is less than 1 minute')
-            self.grid.itemAtPosition(1, 4).widget().setFocus()
-            return
-        # Check if centers are selected
-        for (name, line, label) in [('operations', 2, 0), ('correlator', 2, 3), ('analysis', 2, 5)]:
-            item = getattr(self, name).currentText()
-            if not item:
-                error_message(f'Please select {get_text(line, label)}')
-                self.operations.setFocus()
-                return
-            setattr(self.session, name, item)
-        # Check station list
-        network = get_text(4, 1).split(' -')
-        self.session.included = [code.capitalize() for code in re.findall('..', network[0])]
-        self.session.removed = [code.capitalize() for code in re.findall('..', network[1])] if len(network) > 1 else []
-        if len(self.session.included) + len(self.session.removed) < 2:
-            error_message('Not enough stations')
-            self.grid.itemAtPosition(4, 1).widget().setFocus()
-            return
-        not_valid = [sta_id for sta_id in self.session.included+self.session.removed if sta_id not in self.stations]
-        if not_valid:
-            error_message(f'Not valid stations\n{"".join(not_valid)}')
-            self.grid.itemAtPosition(4, 1).widget().setFocus()
-            return
-        # Update information on VCC
-        try:
-            data = {code: getattr(self.session, code) for code in COLUMNS if hasattr(self.session, code)}
-            data = dict(**data, **{'start': self.session.start, 'master': self.session.master,
-                                   'stations': get_text(4, 1)})
-            rsp = self.api.put(f'/sessions/{self.session.code}', data=data)
-            if not rsp:
-                raise VCCError(f'VCC response {rsp.status_code}\n{rsp.text}')
-            status = json_decoder(rsp.json())[self.session.code]
-            error_message(f'{self.session.code.upper()} not updated\nSame information already on VCC'
-                          if status == 'same' else f'{self.session.code.upper()} {status}', critical=False)
-        except VCCError as exc:
-            error_message(f'Problem updating {self.session.code}\n{str(exc)}')
+    def init_network(self, main_frame):
+        frame = LabelFrame(main_frame, text='Network', padx=5, pady=10)
+        # Reason label and OptionMenu
+        Label(frame, text="Stations", anchor='w').grid(row=0, column=0, padx=5, pady=5, sticky='nw')
+        self.network = VCCEntry(frame, self.session.stations_str)
+        self.network.grid(row=0, column=1, padx=5, pady=5, sticky='we')
+        frame.columnconfigure(1, weight=1)
+        frame.pack(expand=NO, fill=BOTH)
+        return frame
 
     def get_session(self, ses_id):
         try:
-            rsp = self.api.get(f'/sessions/{ses_id}')
+            rsp = self.vcc.get_api().get(f'/sessions/{ses_id}')
             if rsp:
                 return Session(json_decoder(rsp.json()))
         except VCCError:
             pass
         return Session({'code': ses_id})
 
-    def get_stations(self):
+    def get_options(self, url):
         try:
-            rsp = self.api.get(f'/stations')
+            rsp = self.vcc.get_api().get(url)
             if rsp:
-                return [sta['code'].capitalize() for sta in json_decoder(rsp.json())]
+                return [item['code'].strip() for item in json_decoder(rsp.json())]
         except VCCError:
             pass
         return []
 
-    def make_combobox(self, url, selection):
-        cb = QComboBox()
+    def get_stations(self):
         try:
-            rsp = self.api.get(url)
+            rsp = self.vcc.get_api().get('/stations')
             if rsp:
-                [cb.addItem(item['code'].strip()) for item in json_decoder(rsp.json())]
+                return [item['code'].strip() for item in json_decoder(rsp.json())]
         except VCCError:
             pass
-        cb.setCurrentIndex(cb.findText(selection))
-        return cb
+        return []
 
-    def station_list(self):
-        lst = [code.capitalize() for code in self.session.included]
-        if self.session.removed:
-            lst.append(' -')
-            lst.extend([code.capitalize() for code in self.session.removed])
-        return TextBox(''.join(lst))
+    def init_done(self, main_frame):
+        frame = Frame(main_frame, padx=5, pady=5)
+        button = Button(frame, text="Done", command=self.done)
+        button.pack(side=LEFT)
+        Button(frame, text="Submit", command=self.submit).pack(side=RIGHT)
+        frame.configure(height=button.winfo_reqheight()+10)
+        frame.pack(fill=BOTH)
+        return frame
+
+    def done(self):
+        self.root.destroy()
+
+    def submit(self):
+        # Check if name is not empty
+        self.session.type = self.type.get_text().strip()
+        if self.type.is_empty:
+            messagebox.showerror('Input error', 'Session type is empty')
+            self.root.focus_set()
+            self.type.focus_set()
+            return
+        # Get session type
+        self.session.master = 'intensive' if self.is_intensive.get() else 'standard'
+        # Check if start time is valid
+        start = self.start.get_datetime()
+        if not start:
+            messagebox.showerror('Input error', 'Invalid datetime format\nYYYY-mm-dd HH:MM')
+            self.root.focus_set()
+            self.start.focus_set()
+            return
+        self.session.start = start
+        # Check if duration is at least 1 minute
+        err_msg = self.session.set_duration(self.duration.get_text())
+        if err_msg:
+            messagebox.showerror('Input error', err_msg)
+            self.root.focus_set()
+            self.duration.focus_set()
+            return
+        # Check if centers are selected
+        for name in {'operations', 'correlator', 'analysis'}:
+            item = getattr(self, name)
+            if not item.get_text():
+                messagebox.showerror('Input error', f'Select {name}')
+                self.root.focus_set()
+                item.focus_set()
+                return
+            setattr(self.session, name, item.get_text().strip())
+        # Check station list
+        if self.network.is_empty:
+            messagebox.showerror('Input error', f'No stations')
+            self.root.focus_set()
+            self.network.focus_set()
+            return
+
+        network = self.network.get_text().split(' -')
+        included = [code.capitalize() for code in re.findall('..', network[0])]
+        removed = [code.capitalize() for code in re.findall('..', network[1])] if len(network) > 1 else []
+        not_valid = [code for code in included+removed if code not in self.stations]
+        if not_valid:
+            messagebox.showerror('Input error', f'Bad station\n{"".join(not_valid)}')
+            self.root.focus_set()
+            self.network.setFocus()
+            return
+        self.session.included, self.session.removed = included, removed
+        # Update information on VCC
+        try:
+            data = {code: getattr(self.session, code) for code in COLUMNS if hasattr(self.session, code)}
+            data = dict(**data, **{'start': self.session.start, 'master': self.session.master,
+                                   'stations': self.network.get_text()})
+            rsp = self.vcc.get_api().put(f'/sessions/{self.session.code}', data=data)
+            if not rsp:
+                raise VCCError(f'VCC response {rsp.status_code}\n{rsp.text}')
+            status = json_decoder(rsp.json())[self.session.code]
+            if status in ['updated', 'cancelled']:
+                messagebox.showinfo(f'{self.session.code.upper()}', status.capitalize())
+            else:
+                messagebox.showerror(f'{self.session.code.upper()}',
+                                     f'Not updated!'
+                                     f'\n{"Same information already on VCC" if status == "same" else status}')
+        except VCCError as exc:
+            messagebox.showerror(f'Problem updating {self.session.code}', str(exc))
 
 
 def view_session(ses_id):
-    app = QApplication(sys.argv)
     viewer = SessionViewer(ses_id)
-    viewer.show()
-    sys.exit(app.exec_())
 
 
 def main():

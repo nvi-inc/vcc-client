@@ -1,6 +1,7 @@
 import json
 import shutil
 from threading import Thread
+import traceback
 import logging
 import re
 import os
@@ -17,17 +18,17 @@ from vcc.ns import notify
 logger = logging.getLogger('vcc')
 
 
-def notify_all(title, sessions):
+def notify_all(title, sessions, option=''):
     try:
         json.dumps(sessions)
-        notify(title, json.dumps(sessions), option='-m', all_users=True)
+        notify(title, json.dumps(sessions), option=option, all_users=True)
     except:
         logger.warning('could not notify oper')
-    try:
-        message = '\n'.join([f'{Session(ses)} --- {ses["status"]}' for ses in sessions])
-        mail_it(title, message)
-    except:
-        logger.warning('could not sent email')
+    #try:
+    #    message = '\n'.join([f'{Session(ses)} --- {ses["status"]}' for ses in sessions])
+    #    mail_it(title, message)
+    #except:
+    #    logger.warning('could not sent email')
 
     return None
 
@@ -49,7 +50,7 @@ class ProcessMaster(Thread):
             rsp = api.get(f'/sessions/{ses_id}')
             if rsp:
                 sessions.append(dict(**rsp.json(), **{'status': status}))
-        notify_all(f'List of modified sessions for {self.sta_id}', sessions)
+        notify_all(f'List of modified sessions for {self.sta_id}', sessions, option='-m')
 
         # Display upcoming sessions
         Popen(["vcc-ns next"], shell=True, stdin=None, stdout=None, stderr=None, close_fds=True)
@@ -109,6 +110,7 @@ class ProcessSchedule(Thread):
         logger.info(f'{filename} downloaded')
         # Execute drudg
         drudg_it = settings.Messages.Schedule.drudg
+        logger.info(f'drudg_it {drudg_it}')
         if drudg_it == 'no':
             return notify_all(f'{filename} has been downloaded but not processed',
                               'DRUDG is not set for automatic mode')
@@ -116,21 +118,28 @@ class ProcessSchedule(Thread):
             return notify_all(f'{filename} has been downloaded but not processed',
                               '\n'.join([f'{file} was manually modified' for file in modified]))
         # Drug it
-        sta_id = self.sta_id.lower()
-        proc = DRUDG(ses_id, sta_id)
-        err = proc.drudg(filename)
-        if err:
-            return notify_all(f'Problem DRUDG {ses_id}', err)
+        try:
+            sta_id = self.sta_id.lower()
+            proc = DRUDG(ses_id, sta_id)
+            err = proc.drudg(filename)
+            if err:
+                return notify_all(f'Problem DRUDG {ses_id}', err)
+        except Exception as exc:
+            logger.info(str(exc))
+            logger.info(traceback.format_exc())
+            return
 
         modified = os.stat(path).st_mtime
-        ok = lambda f: "ok" if os.path.exists(f) and os.stat(f).st_mtime == modified else "not created"
-        msg = [f'{os.path.basename(file)} {ok(file)}'
+
+        def ok_msg(f):
+            return "ok" if os.path.exists(f) and os.stat(f).st_mtime == modified else "not created"
+        msg = [f'{os.path.basename(file)} {ok_msg(file)}'
                for file in [make_path(settings.Folders.snap, f'{ses_id}{sta_id}.snp'),
                             make_path(settings.Folders.proc, f'{ses_id}{sta_id}.prc')]]
         lst = make_path(settings.Folders.list, f'{ses_id}{sta_id}.lst')
         msg.append(f'{os.path.basename(lst)} {"ok" if os.path.exists(lst) else "not created"}')
 
-        notify_all(f'New schedule for {ses_id}{" - problem drudging it" if err else ""}', '\n'.join(msg))
+        notify_all(f'New schedule for {ses_id}{" - problem drudging it" if err else ""}', '<br>'.join(msg))
         logger.debug(f'end processing schedule {ses_id}')
 
 

@@ -34,7 +34,7 @@ class InboxTracker(Thread):
     def process_message(self, headers, data):
         # Ping sent by dashboard
         code = headers['code']
-        print(headers, data)
+        logger.debug(f'{headers} {data}')
         if code == 'ping':
             self.rmq_client.pong(self.sta_id, headers.get('reply_to'), 'Ok')
         else:

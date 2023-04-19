@@ -5,6 +5,7 @@ import signal
 import logging
 import time
 import json
+import shutil
 from datetime import datetime
 from psutil import Process, process_iter
 
@@ -85,8 +86,9 @@ class NSwatcher(Thread):
 
 def get_vccns_proc():
     my_pid = os.getpid()
+    pids = [my_pid, Process(my_pid).ppid()]
     for prc in process_iter(attrs=['pid', 'name', 'cmdline']):
-        if prc.info['pid'] != my_pid and any(['vcc-ns' in cmd for cmd in prc.info['cmdline'] or []]):
+        if prc.info['pid'] not in pids and any(['vcc-ns' in cmd for cmd in prc.info['cmdline'] or []]):
             return prc
     return None
 
@@ -145,6 +147,37 @@ def restart():
         start()
 
 
+def fetch(ses_id, overwrite=False, rename=False):
+    def rename_skd(skd_path):
+        for i in range(1, 10):
+            new_path = f'{skd_path}.{i}'
+            if not os.path.exists(new_path):
+                shutil.move(skd_path, new_path)
+                return
+
+    with VCC('NS') as vcc:
+        rsp = vcc.get_api().get(f'/schedules/{ses_id}')
+        if not rsp:
+            print(f'Problem downloading schedule for {ses_id}', rsp.text)
+            sys.exit(0)
+        # Save schedule in Schedules folder
+        found = re.compile('.*filename=\"(?P<name>.*)\".*').match(rsp.headers['content-disposition'])
+        if not found:
+            print(f'Problem downloading schedule for {ses_id}', rsp.headers['content-disposition'])
+            sys.exit(0)
+        filename = found['name']
+        path = os.path.join(settings.Folders.schedule, filename)
+        if os.path.exists(path):
+            if rename:
+                rename_skd(path)
+            elif not overwrite:
+                print(f'{path} exists!')
+                sys.exit(0)
+        with open(path, 'wb') as f:
+            f.write(rsp.content)
+        print(f'{path} has been downloaded')
+
+
 # List upcoming sessions for this station
 def upcoming(days, print_it=False):
     sta_id = settings.Signatures.NS[0]
@@ -189,19 +222,25 @@ def main():
                'next': [{'args': ['-p', '--print'], 'kwargs': {'action': 'store_true'}},
                         {'args': ['-d', '--days'], 'kwargs': {'help': 'days ahead', 'type': int, 'default': 14}}],
                'log': [{'args': ['log'], 'kwargs': {'help': 'log file'}}],
+               'fetch': [{'args': ['fetch'], 'kwargs': {'help': 'fetch schedule'}},
+                         {'args': ['-f', '--force'], 'kwargs': {'action': 'store_true'}}],
                }
     exclusive = {'log': [{'args': ['-f', '--full'], 'kwargs': {'action': 'store_true'}},
-                         {'args': ['-r', '--reduce'], 'kwargs': {'action': 'store_true'}}]
+                         {'args': ['-r', '--reduce'], 'kwargs': {'action': 'store_true'}}],
+                 'fetch': [{'args': ['-o', '--overwrite'], 'kwargs': {'action': 'store_true'}},
+                           {'args': ['-r', '--rename'], 'kwargs': {'action': 'store_true'}}]
                  }
 
     parser = argparse.ArgumentParser(description='Network Station', prog=f'vcc-ns {action}')
     parser.add_argument('action', choices=[action], help=argparse.SUPPRESS, type=str.lower)
     parser.add_argument('-c', '--config', help='config file', required=False)
     parser.add_argument('-D', '--debug', help='debug mode is on', action='store_true')
-    [parser.add_argument(*option['args'], **option['kwargs']) for option in options.get(action, [])]
+    for option in options.get(action, []):
+        parser.add_argument(*option['args'], **option['kwargs'])
     if exclusive.get(action, None):
         optional = parser.add_mutually_exclusive_group(required=False)
-        [optional.add_argument(*option['args'], **option['kwargs']) for option in exclusive.get(action, None)]
+        for option in exclusive.get(action, None):
+            optional.add_argument(*option['args'], **option['kwargs'])
 
     args = settings.init(parser.parse_args())
 
@@ -215,13 +254,15 @@ def main():
         set_logger('/usr2/oper/vcc.log', prefix='vcc-', console=args.debug)
         getattr(sys.modules[__name__], args.action)()
     elif args.action == 'drudg':
-        drudg_it(args.drudg, args.vex)
+        drudg_it(args.session, args.vex)
     elif args.action == 'onoff':
         onoff(args.log)
     elif args.action == 'log':
         upload(sta_id, args.log, args.full, args.reduce)
     elif args.action == 'next':
         upcoming(args.days, args.print)
+    elif args.action == 'fetch':
+        fetch(args.fetch, args.overwrite, args.rename)
 
 
 if __name__ == '__main__':

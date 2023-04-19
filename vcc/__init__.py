@@ -4,21 +4,18 @@ import gzip
 import logging
 import logging.handlers
 from pathlib import Path
+import signal
 
 from datetime import date, datetime
 from base64 import urlsafe_b64encode as b64e, urlsafe_b64decode as b64d
 from psutil import Process, process_iter
-
-from PyQt5.QtWidgets import QMessageBox
-from PyQt5.QtGui import QFontMetrics
-from PyQt5.QtCore import Qt
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-groups = ['CC', 'NS', 'OC', 'AC', 'CO', 'DB']
+groups = {'CC', 'NS', 'OC', 'AC', 'CO', 'DB'}
 
 
 # Error with VCC problems
@@ -155,59 +152,6 @@ def set_logger(log_path='', prefix='', console=False, size=1000000):
         logger.addHandler(ch)
     return logger
 
-
-class MessageBox(QMessageBox):
-    def __init__(self):
-        super(MessageBox, self).__init__()
-        self.width = 0
-        self.setTextFormat(Qt.RichText)
-
-    def set_width(self, text, bold):
-        font = self.font()
-        font.setBold(bold)
-
-        self.width = max(self.width, QFontMetrics(font).width(max(text.split('<br>'), key=len)) + 150)
-
-    def setText(self, p_str):
-        p_str = p_str.replace('\n', '<br>')
-        self.set_width(p_str, True)
-        super().setText(p_str)
-
-    def setInformativeText(self, p_text):
-        p_text = p_text.replace('\n', '<br>')
-        self.set_width(p_text, False)
-        super().setInformativeText(p_text)
-
-    def setDetailedText(self, p_text):
-        p_text = p_text.replace('\n', '<br>')
-        self.set_width(p_text, False)
-        super().setDetailedText(p_text)
-
-    def event(self, e):
-        result = QMessageBox.event(self, e)
-
-        self.setMinimumWidth(self.width)
-        return result
-
-
-def show_box(icon, title, text, information=None, details=None):
-    msg = MessageBox()
-    msg.setIcon(icon)
-    msg.setText(text)
-    if information:
-        msg.setInformativeText(information)
-    if details:
-        msg.setDetailedText(details)
-    msg.setWindowTitle(title)
-    msg.exec_()
-
-
-def message_box(title, text, information=None, details=None):
-    show_box(QMessageBox.Information, title, text, information, details)
-
-
-def error_box(title, text, information=None):
-    show_box(QMessageBox.Critical, title, text, information)
 
 
 def get_process(name):

@@ -15,7 +15,7 @@ from paramiko import RSAKey
 from sshtunnel import SSHTunnelForwarder, BaseSSHTunnelForwarderError, HandlerSSHTunnelForwarderError
 from urllib.parse import urljoin
 
-from vcc import make_object, settings, signature, json_encoder, VCCError
+from vcc import make_object, settings, signature, json_encoder, groups, VCCError
 from vcc.messaging import RMQclient, RMQclientException
 
 logger = logging.getLogger('vcc')
@@ -77,8 +77,8 @@ class API:
 
 # Class to connect to VCC Web Service
 class VCC:
-    def __init__(self, group_id):
-        self.group_id = group_id
+    def __init__(self, group_id=None):
+        self.group_id = group_id if group_id else self.get_any_group_id()
         # Initialize communication parameters
         self.base_url = self.url = self.protocol = None
         self.api_port, self.msg_port = 0, 0
@@ -94,6 +94,14 @@ class VCC:
     # Exit function when 'with' is used
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+    @staticmethod
+    def get_any_group_id():
+        for group_id in groups:
+            if hasattr(settings.Signatures, group_id):
+                return group_id
+        else:
+            raise VCCError('No valid groups in configuration file')
 
     def start_tunnel(self, name, config, test=False):
         if name == self.name and self.tunnel:
@@ -133,10 +141,6 @@ class VCC:
 
         self.close()
         raise VCCError('cannot connect to any VCC')
-
-    # Make sure tunnel is close when instance is destroyed
-    def __del__(self):
-        self.close()
 
     @property
     def config(self):

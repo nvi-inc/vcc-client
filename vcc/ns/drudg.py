@@ -31,6 +31,7 @@ class DRUDG:
         # Default timeout time (sec)
         self.timeout = 3
         self.modified = time.time()
+        logger.info('drug initialized')
 
     # Look for specific pattern and provide selection
     def pattern_response(self, child, pattern, selection, end_on_error=True):
@@ -49,6 +50,8 @@ class DRUDG:
 
     # start interactive drudg
     def drudg(self, filename):
+
+        logger.info(f'processing {filename}')
 
         schedule = os.path.join(settings.Folders.schedule, os.path.basename(filename))
         logger.debug(f'DRUDG {schedule}')
@@ -116,7 +119,9 @@ class DRUDG:
             if match:
                 logger.debug(f'prompts: match {match.group(1)}')
                 outfile = match.group(1).strip()
+                logger.debug(f'outfile 1 {outfile}')
                 outfile = outfile if os.path.dirname(outfile) else os.path.join(settings.Folders.schedule, outfile)
+                logger.debug(f'outfile 2 {outfile}')
                 # Set modified time to same than schedule file
                 os.utime(outfile, (time.time(), self.modified))
                 # Move to appropriate folder
