@@ -12,7 +12,7 @@ from vcc import settings, VCCError, json_decoder, groups
 from vcc.server import VCC
 from vcc.session import Session
 from vcc.messaging import RMQclientException
-
+from vcc.windows import MessageBox
 
 class Inbox(threading.Thread):
 
@@ -382,13 +382,21 @@ class Dashboard:
 
     def process_master(self, headers, data):
         status = data.get(self.session.code.upper(), None)
-        if status == 'cancelled':
-            Urgent(self.root, 'Message from VCC', f'{self.session.code} has been cancelled')
-        elif status == 'updated':
-            Urgent(self.root, 'Message from VCC', f'{self.session.code} was updated\nYou should restart Dashboard')
+
+        msg = f'{self.session.code} was {status}'
+        if status == 'updated':
+            msg += '\nYou should restart Dashboard'
+        subject = 'Message from VCC'
+        MessageBox(self.root, subject, msg, icon='urgent')
 
     def process_schedule(self, headers, data):
         threading.Thread(target=self.get_schedule).start()
+
+    def process_urgent(self, headers, data):
+
+        subject = f'Urgent message from {data["fr"]}'
+        msg = data.get('message', "None")
+        MessageBox(self.root, subject, msg, icon='warning')
 
     def process_messages(self):
         while not self.messages.empty():

@@ -5,7 +5,7 @@ import logging
 from threading import Thread
 
 from vcc.messaging import RMQclientException
-from vcc.ns.processes import ProcessMaster, ProcessSchedule, ProcessLog
+from vcc.ns.processes import ProcessMaster, ProcessSchedule, ProcessLog, ProcessUrgent
 
 logger = logging.getLogger('vcc')
 
@@ -49,6 +49,8 @@ class InboxTracker(Thread):
                     ProcessSchedule(self.vcc, self.sta_id, data).start()
                 elif code == 'log':
                     ProcessLog(self.vcc, self.sta_id, code, data).start()
+                elif code == 'urgent':
+                    ProcessUrgent(self.vcc, self.sta_id, code, data).start()
             except Exception as exc:
                 logger.warning(f'invalid message {str(exc)}')
                 [logger.warning(line.strip()) for line in traceback.format_exc().splitlines()]

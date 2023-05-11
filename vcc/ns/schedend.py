@@ -71,7 +71,7 @@ class VCCScan(ttk.Combobox):
 
 class SessionReport:
 
-    key_words: set = {'warm', 'missed', 'issue', 'fmout-gps', 'gps-fmout', 'late', 'μs'}
+    key_words: set = {'warm', 'missed', 'issue', 'late'}
     fmout: set = {'fmout-gps', 'gps-fmout'}
 
     def __init__(self, session):
@@ -222,16 +222,16 @@ class SessionReport:
         frame.pack(expand=NO, fill=BOTH)
         return frame
 
-    def new_information(self, event):
+    def new_information(self):
         pass
 
-    def first_has_changed(self, event):
+    def first_has_changed(self):
         pass
 
-    def last_has_changed(self, event):
+    def last_has_changed(self):
         pass
 
-    def comment_has_changed(self, event):
+    def comment_has_changed(self):
         pass
 
     def selection_changed(self, a):

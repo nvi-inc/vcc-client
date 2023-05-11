@@ -156,4 +156,18 @@ class ProcessLog(Thread):
         logger.debug(ans)
 
 
+class ProcessUrgent(Thread):
+    # overriding constructor
+    def __init__(self, vcc, sta_id, code, data):
+        # calling parent class constructor
+        Thread.__init__(self)
+        self.vcc, self.sta_id, self.full, self.data = vcc, sta_id, code == 'full_log', data
+
+    def run(self):
+        title = f'Urgent message from {self.data.get("fr", "?")}'
+        msg = self.data.get("message", "EMPTY").splitlines()
+        notify(title, json.dumps(msg), option='', all_users=True)
+        for line in msg:
+            logger.debug(line)
+
 

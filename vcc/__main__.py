@@ -41,7 +41,6 @@ def main():
     parser = argparse.ArgumentParser(description='Access VCC functionalities')
     parser.add_argument('-c', '--config', help='config file', required=False)
     group = parser.add_mutually_exclusive_group(required=False)
-    group.add_argument('-v', '--viewer', help='view upcoming sessions', choices=masters, required=False)
     group.add_argument('-V', '--version', help='display version', action='store_true', required=False)
     group.add_argument('-s', '--sked', help='update VCC with sked files', nargs='+', required=False)
     parser.add_argument('param', help='station or session code', nargs='?')
@@ -52,13 +51,13 @@ def main():
 
     if args.version:
         show_version()
-    elif args.viewer:
-        upcoming(master=args.viewer)  # SessionPicker(args.viewer).exec()
+    elif args.param in ('int', 'std', 'all'):
+        upcoming(master=args.param)  # SessionPicker(args.viewer).exec()
     elif args.sked:
         upload_schedule_files(args.sked) if settings.check_privilege('OC') else \
             print('Only an Operations Center can upload schedules')
     elif args.param:
-        show_next(args.param) if len(args.param) == 2 else show_session(args.param)
+        upcoming(sta_id=args.param) if len(args.param) == 2 else show_session(args.param)
     else:
         upcoming(master='all')
 
