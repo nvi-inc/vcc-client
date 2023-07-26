@@ -8,8 +8,12 @@ from tkinter import font
 class MessageBox(Toplevel):
     icons = dict(info='info', warning='warning', urgent='urgent')
 
-    def __init__(self, root, title, message, icon=None):
+    def __init__(self, root, title, message, icon=None, exit_on_close=False):
         super().__init__(root)
+
+        self.root, self.exit_on_close = root, exit_on_close
+
+        message = message.replace("<br>", "\n")
 
         icon = self.icons.get(icon, self.icons['info'])
         self.pic = PhotoImage(file=pkg_resources.resource_filename(__name__, f'images/{icon}.png'))
@@ -32,6 +36,11 @@ class MessageBox(Toplevel):
         width = max(self.subject.winfo_reqwidth(), self.message.winfo_reqwidth()) + 10
         width = max(400, self.msg_icon.winfo_reqwidth() + width + 10)
         self.geometry(f"{width}x{height}")
+
+    def destroy(self):
+        super().destroy()
+        if self.exit_on_close:
+            self.root.destroy()
 
 
 def main():

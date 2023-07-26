@@ -90,7 +90,7 @@ class Inbox:
         MessageBox(self.root, 'Master updated', msg, icon='warning')
 
     def process_urgent(self, headers, data):
-        msg = data.get('message', "Message was empty").replace('<br>', '\n')
+        msg = data.get('message', "Message was empty")
         MessageBox(self.root, f'Urgent message sent by {data["fr"]}', msg, icon='urgent')
 
     def exec(self):
@@ -119,6 +119,7 @@ def main():
     args = settings.init(parser.parse_args())
 
     Inbox(args.group).exec()
+
 
 if __name__ == '__main__':
 

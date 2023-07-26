@@ -7,6 +7,7 @@ from tkinter import ttk
 from tkinter import messagebox
 
 from vcc import json_decoder
+from vcc.windows import MessageBox
 
 
 class Sessions:
@@ -82,10 +83,14 @@ class Sessions:
             pass
 
 
-def show_message(title, message):
+def show_message(title, message, icon):
+    #root = Tk()
+    #root.withdraw()
+    #messagebox.showinfo(title, message.replace('<br>', '\n'))
     root = Tk()
     root.withdraw()
-    messagebox.showinfo(title, message.replace('<br>', '\n'))
+    MessageBox(root, title, message, icon=icon, exit_on_close=True)
+    root.mainloop()
 
 
 def main():
@@ -98,6 +103,7 @@ def main():
 
     parser.add_argument('title')
     parser.add_argument('message')
+    parser.add_argument('icon', nargs='?')
 
     args = parser.parse_args()
 
@@ -105,7 +111,7 @@ def main():
         sessions = json_decoder(json.loads(args.message))
         Sessions(args.title, sessions, args.master, args.dashboard)
     else:
-        show_message(args.title, args.message)
+        show_message(args.title, args.message, args.icon)
 
 
 if __name__ == '__main__':

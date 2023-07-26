@@ -153,7 +153,6 @@ def set_logger(log_path='', prefix='', console=False, size=1000000):
     return logger
 
 
-
 def get_process(name):
     my_pid = os.getpid()
     for prc in process_iter(attrs=['pid', 'name', 'cmdline']):

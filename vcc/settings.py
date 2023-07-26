@@ -31,7 +31,6 @@ def init(args):
             # Add information in config file to this module
             make_object(data, this_module)
             return args
-
     print('no valid configuration file')
 
 

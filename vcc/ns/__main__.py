@@ -197,7 +197,7 @@ def upcoming(days, print_it=False):
         elif print_it:
             print('VCC problem', rsp.text)
         else:
-            notify('VCC problem', rsp.text)
+            notify('VCC problem', rsp.text, icon='urgent')
 
 
 def main():

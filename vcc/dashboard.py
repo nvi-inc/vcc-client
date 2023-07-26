@@ -14,6 +14,7 @@ from vcc.session import Session
 from vcc.messaging import RMQclientException
 from vcc.windows import MessageBox
 
+
 class Inbox(threading.Thread):
 
     def __init__(self, ses_id, vcc, messages):

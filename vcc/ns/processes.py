@@ -18,10 +18,10 @@ from vcc.ns import notify
 logger = logging.getLogger('vcc')
 
 
-def notify_all(title, sessions, option=''):
+def notify_all(title, sessions, option='', icon='info'):
     try:
         json.dumps(sessions)
-        notify(title, json.dumps(sessions), option=option, all_users=True)
+        notify(title, json.dumps(sessions), option=option, all_users=True, icon=icon)
     except:
         logger.warning('could not notify oper')
     #try:
@@ -91,16 +91,18 @@ class ProcessSchedule(Thread):
         # Download schedule (skd first)
         download_option = settings.Messages.Schedule.download.split()[0]
         if download_option == 'no':
-            return notify_all(f'New schedule available for {ses_id}', 'Not downloaded: configuration set to no')
+            return notify_all(f'New schedule available for {ses_id}', 'Not downloaded: configuration set to no',
+                              icon='warning')
         # Request file from VCC
         rsp = self.vcc.get_api().get(f'/schedules/{ses_id}')
         logger.debug(f'get schedule {rsp.status_code}')
         if not rsp:
-            return notify_all(f'Problem downloading schedule for {ses_id}', rsp.text)
+            return notify_all(f'Problem downloading schedule for {ses_id}', rsp.text, icon='urgent')
         # Save schedule in Schedules folder
         found = self.get_name(rsp.headers['content-disposition'])
         if not found:
-            return notify_all(f'Problem downloading schedule for {ses_id}', rsp.headers['content-disposition'])
+            return notify_all(f'Problem downloading schedule for {ses_id}', rsp.headers['content-disposition'],
+                              icon='urgent')
         filename = found['name']
         path = make_path(settings.Folders.schedule, filename)
         modified = self.prc_snp_modified(path, ses_id)
@@ -113,17 +115,17 @@ class ProcessSchedule(Thread):
         logger.info(f'drudg_it {drudg_it}')
         if drudg_it == 'no':
             return notify_all(f'{filename} has been downloaded but not processed',
-                              'DRUDG is not set for automatic mode')
+                              'DRUDG is not set for automatic mode', icon='warning')
         if modified and drudg_it == 'not_modified':
             return notify_all(f'{filename} has been downloaded but not processed',
-                              '\n'.join([f'{file} was manually modified' for file in modified]))
+                              '<br>'.join([f'{file} was manually modified' for file in modified]), icon='warning')
         # Drug it
         try:
             sta_id = self.sta_id.lower()
             proc = DRUDG(ses_id, sta_id)
             err = proc.drudg(filename)
             if err:
-                return notify_all(f'Problem DRUDG {ses_id}', err)
+                return notify_all(f'Problem DRUDG {ses_id}', err, icon='urgent')
         except Exception as exc:
             logger.info(str(exc))
             logger.info(traceback.format_exc())
@@ -131,15 +133,17 @@ class ProcessSchedule(Thread):
 
         modified = os.stat(path).st_mtime
 
-        def ok_msg(f):
-            return "ok" if os.path.exists(f) and os.stat(f).st_mtime == modified else "not created"
+        def ok_msg(_f):
+            return "ok" if os.path.exists(_f) and os.stat(_f).st_mtime == modified else "not created"
+
         msg = [f'{os.path.basename(file)} {ok_msg(file)}'
                for file in [make_path(settings.Folders.snap, f'{ses_id}{sta_id}.snp'),
                             make_path(settings.Folders.proc, f'{ses_id}{sta_id}.prc')]]
         lst = make_path(settings.Folders.list, f'{ses_id}{sta_id}.lst')
         msg.append(f'{os.path.basename(lst)} {"ok" if os.path.exists(lst) else "not created"}')
 
-        notify_all(f'New schedule for {ses_id}{" - problem drudging it" if err else ""}', '<br>'.join(msg))
+        icon = 'urgent' if err else 'info'
+        notify_all(f'New schedule for {ses_id}{" - problem drudging it" if err else ""}', '<br>'.join(msg), icon=icon)
         logger.debug(f'end processing schedule {ses_id}')
 
 
@@ -166,7 +170,7 @@ class ProcessUrgent(Thread):
     def run(self):
         title = f'Urgent message from {self.data.get("fr", "?")}'
         msg = self.data.get("message", "EMPTY").splitlines()
-        notify(title, json.dumps(msg), option='', all_users=True)
+        notify(title, '<br>'.join(msg), option='', all_users=True, icon='urgent')
         for line in msg:
             logger.debug(line)
 

@@ -43,6 +43,8 @@ def main():
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument('-V', '--version', help='display version', action='store_true', required=False)
     group.add_argument('-s', '--sked', help='update VCC with sked files', nargs='+', required=False)
+    group.add_argument('-u', '--upload', help='update VCC with sked files', nargs='+', required=False)
+    group.add_argument('-r', '--report', help='update VCC with sked files', nargs='+', required=False)
     parser.add_argument('param', help='station or session code', nargs='?')
 
     args, _ = parser.parse_known_args()
@@ -54,7 +56,10 @@ def main():
     elif args.param in ('int', 'std', 'all'):
         upcoming(master=args.param)  # SessionPicker(args.viewer).exec()
     elif args.sked:
-        upload_schedule_files(args.sked) if settings.check_privilege('OC') else \
+        upload_schedule_files(args.sked, notify=True) if settings.check_privilege('OC') else \
+            print('Only an Operations Center can upload schedules')
+    elif args.upload:
+        upload_schedule_files(args.upload, notify=False) if settings.check_privilege('OC') else \
             print('Only an Operations Center can upload schedules')
     elif args.param:
         upcoming(sta_id=args.param) if len(args.param) == 2 else show_session(args.param)

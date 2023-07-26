@@ -45,10 +45,10 @@ class API:
             raise VCCError('connect error')
 
     # POST data to web service
-    def post(self, path, data=None, files=None, headers=None):
+    def post(self, path, data=None, files=None, headers=None, params=None):
         try:
             rsp = self.session.post(url=urljoin(self.base_url, path), json=json_encoder(data), files=files,
-                                    headers=headers)
+                                    params=params, headers=headers)
             self.jwt_data = signature.validate(rsp) if rsp else None
             return rsp
         except requests.exceptions.ConnectionError:

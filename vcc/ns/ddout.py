@@ -95,11 +95,13 @@ class DDoutScanner(Thread):
         if len(data) > 1 and data[1].lower() in self.key_words:
             ses_id, key_word = data[0], data[1].lower()
         if not ses_id:
-            notify(f'Invalid ses-info record', f'Session code is required')
+            notify(f'Invalid ses-info record', f'Session code is required', icon='warning')
         elif ses_id != self.ses_id and not self.test_session(ses_id):
-            notify(f'Invalid ses-info record', f'{ses_id} is not valid session<br>or<br>{self.sta_id} not in {ses_id}')
+            notify(f'Invalid ses-info record', f'{ses_id} is not valid session<br>or<br>{self.sta_id} not in {ses_id}',
+                   icon='warning')
         elif key_word not in self.key_words:
-            notify(f'Invalid ses-info record)', f'Valid key words are:<br>{"<br>".join(self.key_words)}')
+            notify(f'Invalid ses-info record)', f'Valid key words are:<br>{"<br>".join(self.key_words)}',
+                   icon='warning')
         else:
             self.send_msg({'status': f'{rec["key"]}:{rec["data"]}', 'session': ses_id})
         return True

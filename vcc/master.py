@@ -380,6 +380,19 @@ class SessionViewer:
             messagebox.showerror(f'Problem updating {self.session.code}', str(exc))
 
 
+def delete_session(ses_id):
+    try:
+        vcc = VCC('CC')
+        api = vcc.get_api()
+        rsp = api.get(f'/sessions/{ses_id.lower()}')
+        if not rsp:
+            raise VCCError(rsp.text)
+        rsp = api.delete(f'/sessions/{ses_id.lower()}')
+        print(rsp.text)
+    except VCCError as exc:
+        print(str(exc))
+
+
 def view_session(ses_id):
     viewer = SessionViewer(ses_id)
 
@@ -390,6 +403,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='Access VCC functionalities')
     parser.add_argument('-c', '--config', help='config file', required=False)
+    parser.add_argument('-d', '--delete', help='delete', action='store_true')
     parser.add_argument('param', help='master file or session code')
 
     args = settings.init(parser.parse_args())
@@ -397,6 +411,10 @@ def main():
     # Check that user has right privileges
     if not settings.check_privilege('CC'):
         print(f'Only Coordinating center can update master data on VCC')
+        return
+
+    if args.delete:
+        delete_session(args.param)
         return
 
     path = Path(args.param)

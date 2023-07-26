@@ -16,13 +16,13 @@ def print_session(data):
     print(f'{data["analysis"].upper():4s} {db_name}')
 
 
-def upload_schedule_files(path_list):
+def upload_schedule_files(path_list, notify=True):
     try:
         with VCC('OC') as vcc:
             api = vcc.get_api()
             print(path_list)
             files = [('files', (os.path.basename(path), open(path, 'rb'), 'text/plain')) for path in path_list]
-            rsp = api.post('/schedules', files=files)
+            rsp = api.post('/schedules', files=files, params={'notify': notify})
             if not rsp:
                 raise VCCError(f'{rsp.status_code}: {rsp.text}')
             [print(file, result) for file, result in rsp.json().items()]

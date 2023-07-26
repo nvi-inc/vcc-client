@@ -25,8 +25,8 @@ def get_displays(all_users=False, display=None):
 
 
 # Notify oper using vcc message_box. Pop message box to all displays or the user display
-def notify(title, message, option='', all_users=False, display=None):
-    cmd = f"vcc-message {option} \'{title}\' \'{message}\'"
+def notify(title, message, option='', all_users=False, display=None, icon='info'):
+    cmd = f"vcc-message {option} \'{title}\' \'{message}\' \'{icon}\'"
 
     # Use popen so that thread is not blocked by window message
     if not display and not all_users:
