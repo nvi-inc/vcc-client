@@ -38,11 +38,14 @@ class VCChandler(logging.handlers.WatchedFileHandler):
     def make_log(self):
         if not self.path.exists():
             open(self.path, 'w').close()
+        os.chmod(self.path, 0o664)
         shutil.chown(self.path, 'oper', 'rtx')
 
-    def emit(self, record):
-        print('emit', str(self.path), self.path.exists())
-        super.emit(record)
+    def reopenIfNeeded(self):
+        if not self.path.exists():
+            self.flush()
+            self.close()
+            self.make_log()
 
 
 # Class used to monitor VCC inbox and DDOUT continuously
@@ -55,38 +58,16 @@ class NSwatcher(Thread):
 
         super().__init__()
 
-        # signal.signal(signal.SIGINT, self.terminate)
-        # signal.signal(signal.SIGHUP, self.terminate)
         signal.signal(signal.SIGTERM, self.terminate)
 
-        def init_log():
-            path = Path(settings.Folders.log, 'vcc', 'vcc-ns.log')
-
-        print('log file', str(Path(settings.Folders.log, 'vcc', 'vcc-ns.log')))
-        # handler = logging.FileHandler(str(Path(settings.Folders.log, 'vcc', 'vcc-ns.log')))
         handler = VCChandler(Path(settings.Folders.log, 'vcc', 'vcc-ns.log'))
-        # handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(logging.Formatter('%(utc)s [%(levelname)s] %(message)s'))
         logger.addFilter(ContextFilter())
         logger.setLevel(logging_level)
         logger.addHandler(handler)
 
-        logger.info('vcc-ns started')
-
         self.sta_id, self.stopped = sta_id, Event()
         self.threads = {name: None for name in self.which.keys()}
-
-    @staticmethod
-    def init_log_file(path):
-
-        path = Path(settings.Folders.log, 'vcc-ns.log')
-        print(f'log {str(path)}')
-
-        if not path.exists():
-            open(path, 'a').close()
-        # shutil.chown(path, ['oper', 'rtx'])
-        print(f'log {str(path)} {path.exists()}')
-        return path
 
     def stop_thread(self, name):
         try:
@@ -98,7 +79,7 @@ class NSwatcher(Thread):
             logger.debug(f'problem stopping {name} - {str(exc)}')
 
     def run(self):
-        logger.info(f'service started {self.native_id}')
+        logger.info(f'vcc-ns started {self.native_id}')
 
         vcc, problem, show_msg = VCC('NS'), Event(), Event()
         problem.set()
@@ -138,11 +119,11 @@ class NSwatcher(Thread):
         # Terminated. Close all connections
         for name in reversed(self.threads.keys()):
             self.stop_thread(name)
-        logger.debug('stop vcc')
+        logger.debug('wait for threads')
         vcc.close()
         for name in reversed(self.threads.keys()):
             self.threads[name].join()
-        logger.info('service stopped')
+        logger.info('vcc-ns stopped')
         sys.exit(0)
 
     def terminate(self, sig, alarm):
