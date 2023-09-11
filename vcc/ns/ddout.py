@@ -1,7 +1,6 @@
 import os.path
 from threading import Thread, Event
 from datetime import datetime, timedelta
-from threading import Event
 import re
 import logging
 import traceback
@@ -12,8 +11,9 @@ from vcc import VCCError, json_decoder
 from vcc.messaging import RMQclientException
 from vcc.ns import notify
 from vcc.ns.onoff import post_onoff
+from vcc.ns.processes import ProcessLog
 
-logger = logging.getLogger('vcc')
+logger = logging.getLogger('vccns')
 
 
 # Read records from log file opened by ddout
@@ -35,12 +35,11 @@ class DDoutScanner(Thread):
                 ]
             ]
 
-    def __init__(self, sta_id, vcc):
+    def __init__(self, sta_id, vcc, problem):
         super().__init__()
 
         self.stopped = Event()
-        self.sta_id, self.vcc = sta_id, vcc
-        self.rmq = self.vcc.get_rmq_connection()
+        self.sta_id, self.vcc, self.problem, self.rmq = sta_id, vcc, problem, None
         self.log = self.active = self.ses_id = None
         self.last_time = {}
         self.onoff, self.header = [], []
@@ -49,28 +48,38 @@ class DDoutScanner(Thread):
     def close_log(self):
         if self.log:
             self.log.close()
-            self.send_msg({'status': f'{os.path.basename(self.active)} closed', 'session': self.ses_id})
+            if self.ses_id:
+                self.send_msg({'status': f'{os.path.basename(self.active)} closed', 'session': self.ses_id})
+                ProcessLog(self.vcc, self.sta_id, 'full_log', {'session': self.ses_id})
+
         self.active = self.log = None
 
-    def test_session(self, ses_id):
+    def is_valid_session(self, ses_id):
         rsp = self.vcc.get_api().get(f'/sessions/{ses_id}')
         if rsp:
             data = json_decoder(rsp.json())
-            return self.sta_id.capitalize() in data.get('included', []) + data.get('removed', [])
+            return data.get('code', '').lower() == ses_id.lower() if data else False
         return False
+
+    def connect(self, warning=None):
+        try:
+            self.rmq = self.vcc.get_rmq_connection()
+            if warning:
+                logger.warning(warning)
+        except VCCError:
+            self.problem.set()
 
     # Open log file if different that active file
     def open_log(self, path):
         if path != self.active:
             name = os.path.basename(path)
             self.close_log()
+            self.active, self.log = path, open(path, 'r', encoding="utf8", errors="ignore")
+            ses_id = name[:-6] if name.endswith(f'{self.sta_id.lower()}.log') else None
+            self.ses_id = ses_id if ses_id and self.is_valid_session(ses_id) else None
+            logger.debug(f'OPEN LOG {path} SES_ID {self.ses_id}')
             if self.ses_id:
                 self.send_msg({'status': f'{name} opened', 'session': self.ses_id})
-            self.active, self.log = path, open(path, 'r', encoding="utf8", errors="ignore")
-            ses_id = os.path.basename(path)[:-6] if path.endswith(f'{self.sta_id.lower()}.log') else None
-            self.ses_id = ses_id if ses_id and self.test_session(ses_id) else None
-            logger.debug(f'OPEN LOG {path} SES_ID {self.ses_id}')
-            self.send_msg({'status': f'{name} opened', 'session': self.ses_id})
         return self.last_time.get(self.active, datetime.utcnow() - timedelta(seconds=2))
 
     # Get the path of the file opened by ddout
@@ -140,16 +149,20 @@ class DDoutScanner(Thread):
 
     def send_msg(self, msg):
         try:
-            logger.info(f'{self.sta_id} sending {msg}')
             self.rmq.send(self.sta_id, 'sta_info', 'msg', msg)
+            logger.info(f'sta_info msg {str(msg)}')
         except Exception as exc:
-            print('send_msg', str(exc), traceback.print_exc())
+            logger.warning(f'sta_inf msg {str(msg)} failed')
+            logger.warning(f'sta_info msg problem -  0 {str(exc)}')
+            for index, line in enumerate(traceback.format_exc().splitlines(), 1):
+                logger.warning(f'sta_info msg problem - {index:2d} {line.strip()}')
 
     # The continuous function
     def run(self):
-        try:
-            logger.info('start ddout scanner')
-            while not self.stopped.wait(0.5):
+        logger.info(f'ddout started {self.native_id}')
+        self.connect()
+        while not self.stopped.wait(0.5):
+            try:
                 self.rmq.keep_connection_alive()
                 path = self.get_ddout_log()
                 if not path:
@@ -167,13 +180,15 @@ class DDoutScanner(Thread):
                                     self.send_onoff()
                                     self.send_status(info)
                                 self.last_time[self.active] = timestamp
+            except (RMQclientException, VCCError) as exc:
+                logger.warning(f'ddout communication failed - {str(exc)}')
+                self.connect(warning='ddout communication reset')
 
-            self.send_onoff()
-            self.close_log()
-        except (RMQclientException, VCCError) as exc:
-            logger.warning(f'log scanner failed! - {str(exc)}')
+        self.send_onoff()
+        self.close_log()
+        logger.info('ddout stopped')
 
     def stop(self):
-        logger.info(f'stop ddout scanner')
+        logger.debug(f'ddout stop requested')
         self.stopped.set()
 

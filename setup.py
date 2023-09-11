@@ -4,7 +4,7 @@ setup(
     name='vcc',
     packages=['vcc', 'vcc.ns', 'vcc.images'],
     description='Client software for VLBI Operations Center (VCC)',
-    version='1.3.2',
+    version='1.3.3',
     url='http://github.com/',
     author='Mario',
     author_email='mario.berube@nviinc.com',
@@ -17,6 +17,7 @@ setup(
         'console_scripts': [
             'vcc=vcc.__main__:main',
             'vcc-test=vcc.users:main',
+            'service=vcc.ns.service:main',
             'vcc-message=vcc.tools:main',
             'vcc-ns=vcc.ns.__main__:main',
             'ses-info=vcc.ns.sesinfo:main',

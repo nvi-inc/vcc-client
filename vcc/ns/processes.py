@@ -38,7 +38,8 @@ class ProcessMaster(Thread):
     def __init__(self, vcc, sta_id, data):
         # calling parent class constructor
         Thread.__init__(self)
-        self.vcc, self.sta_id, self.data = vcc, sta_id, data
+        self.vcc, self.sta_id = vcc, sta_id
+        self.data = data if data else {}
 
     def run(self):
         logger.debug('star processing master')
@@ -60,10 +61,11 @@ class ProcessSchedule(Thread):
 
     get_name = re.compile('.*filename=\"(?P<name>.*)\".*').match
 
-    def __init__(self, vcc, sta_id, data):
+    def __init__(self, vcc, sta_id, data=None):
         # calling parent class constructor
         Thread.__init__(self)
-        self.vcc, self.sta_id, self.data = vcc, sta_id, dict(data)
+        self.vcc, self.sta_id = vcc, sta_id
+        self.ses_id = data.get('session', None) if data else None
 
     @staticmethod
     def rename(download_option, path):
@@ -86,26 +88,25 @@ class ProcessSchedule(Thread):
                 if os.path.exists(file) and os.stat(file).st_mtime > sched_time]
 
     def run(self):
-        ses_id = self.data['session'].lower()
-        logger.debug(f'star processing schedule {ses_id}')
+        logger.debug(f'star processing schedule {self.ses_id}')
         # Download schedule (skd first)
         download_option = settings.Messages.Schedule.download.split()[0]
         if download_option == 'no':
-            return notify_all(f'New schedule available for {ses_id}', 'Not downloaded: configuration set to no',
+            return notify_all(f'New schedule available for {self.ses_id}', 'Not downloaded: configuration set to no',
                               icon='warning')
         # Request file from VCC
-        rsp = self.vcc.get_api().get(f'/schedules/{ses_id}')
+        rsp = self.vcc.get_api().get(f'/schedules/{self.ses_id}')
         logger.debug(f'get schedule {rsp.status_code}')
         if not rsp:
-            return notify_all(f'Problem downloading schedule for {ses_id}', rsp.text, icon='urgent')
+            return notify_all(f'Problem downloading schedule for {self.ses_id}', rsp.text, icon='urgent')
         # Save schedule in Schedules folder
         found = self.get_name(rsp.headers['content-disposition'])
         if not found:
-            return notify_all(f'Problem downloading schedule for {ses_id}', rsp.headers['content-disposition'],
+            return notify_all(f'Problem downloading schedule for {self.ses_id}', rsp.headers['content-disposition'],
                               icon='urgent')
         filename = found['name']
         path = make_path(settings.Folders.schedule, filename)
-        modified = self.prc_snp_modified(path, ses_id)
+        modified = self.prc_snp_modified(path, self.ses_id)
         self.rename(download_option, path)
         with open(path, 'wb') as f:
             f.write(rsp.content)
@@ -122,10 +123,10 @@ class ProcessSchedule(Thread):
         # Drug it
         try:
             sta_id = self.sta_id.lower()
-            proc = DRUDG(ses_id, sta_id)
+            proc = DRUDG(self.ses_id, sta_id)
             err = proc.drudg(filename)
             if err:
-                return notify_all(f'Problem DRUDG {ses_id}', err, icon='urgent')
+                return notify_all(f'Problem DRUDG {self.ses_id}', err, icon='urgent')
         except Exception as exc:
             logger.info(str(exc))
             logger.info(traceback.format_exc())
@@ -137,41 +138,45 @@ class ProcessSchedule(Thread):
             return "ok" if os.path.exists(_f) and os.stat(_f).st_mtime == modified else "not created"
 
         msg = [f'{os.path.basename(file)} {ok_msg(file)}'
-               for file in [make_path(settings.Folders.snap, f'{ses_id}{sta_id}.snp'),
-                            make_path(settings.Folders.proc, f'{ses_id}{sta_id}.prc')]]
-        lst = make_path(settings.Folders.list, f'{ses_id}{sta_id}.lst')
+               for file in [make_path(settings.Folders.snap, f'{self.ses_id}{sta_id}.snp'),
+                            make_path(settings.Folders.proc, f'{self.ses_id}{sta_id}.prc')]]
+        lst = make_path(settings.Folders.list, f'{self.ses_id}{sta_id}.lst')
         msg.append(f'{os.path.basename(lst)} {"ok" if os.path.exists(lst) else "not created"}')
 
         icon = 'urgent' if err else 'info'
-        notify_all(f'New schedule for {ses_id}{" - problem drudging it" if err else ""}', '<br>'.join(msg), icon=icon)
-        logger.debug(f'end processing schedule {ses_id}')
+        notify_all(f'New schedule for {self.ses_id}{" - problem drudging it" if err else ""}'
+                   , '<br>'.join(msg), icon=icon)
+        logger.debug(f'end processing schedule {self.ses_id}')
 
 
 class ProcessLog(Thread):
     # overriding constructor
-    def __init__(self, vcc, sta_id, code, data):
+    def __init__(self, vcc, sta_id, data=None):
         # calling parent class constructor
         Thread.__init__(self)
-        self.vcc, self.sta_id, self.full, self.data = vcc, sta_id, code == 'full_log', data
+        self.vcc, self.sta_id, self.ses_id = vcc, sta_id
+        self.data = data if data else {}
 
     def run(self):
-        logger.debug('star processing log')
-        ans = upload(self.sta_id, self.data['session'], full=True)
-        logger.debug(ans)
+        ses_id = self.data.get('session', None)
+        if ses_id:
+            upload(self.vcc, self.sta_id, ses_id, full=True)
 
 
 class ProcessUrgent(Thread):
     # overriding constructor
-    def __init__(self, vcc, sta_id, code, data):
+    def __init__(self, vcc, sta_id, data=None):
         # calling parent class constructor
         Thread.__init__(self)
-        self.vcc, self.sta_id, self.full, self.data = vcc, sta_id, code == 'full_log', data
+        self.vcc, self.sta_id = vcc, sta_id
+        self.data = data if data else {}
 
     def run(self):
         title = f'Urgent message from {self.data.get("fr", "?")}'
         msg = self.data.get("message", "EMPTY").splitlines()
         notify(title, '<br>'.join(msg), option='', all_users=True, icon='urgent')
-        for line in msg:
-            logger.debug(line)
+        logger.info(title)
+        for index, line in enumerate(msg, 1):
+            logger.info(f'{index:2d} {line}')
 
 

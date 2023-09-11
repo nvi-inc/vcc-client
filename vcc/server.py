@@ -82,10 +82,7 @@ class VCC:
         # Initialize communication parameters
         self.base_url = self.url = self.protocol = None
         self.api_port, self.msg_port = 0, 0
-        self.name = ''
-        # Initialized tunnels
-        self.tunnel = None
-        self.connect()  # Connect to VCC server
+        self.name, self.tunnel = '', None
 
     # Enter function when 'with' is used
     def __enter__(self):
@@ -123,6 +120,12 @@ class VCC:
 
         return name, tunnel
 
+    def tunnel_is_up(self):
+        if not self.tunnel:
+            return False
+        self.tunnel.check_tunnels()
+        return all(list(self.tunnel.tunnel_is_up.values()))
+
     # Get first available VWS client
     def connect(self):
         # Get list of VLBI Communications Center (VCC)
@@ -153,7 +156,7 @@ class VCC:
             rsp = self.get_api().get('/', timeout=5)  # Not more than 5 seconds to look for web service
             return 'Welcome to VLBI Communications Center' in rsp.text if rsp else False
         except Exception as exc:
-            logger.debug(f'vcc available {str(exc)}')
+            logger.debug(f'vcc not available - {str(exc)}')
             return False
 
     # Stop/Close all connections
@@ -161,6 +164,7 @@ class VCC:
         try:
             if self.tunnel:
                 self.tunnel.stop()
+                logger.debug('tunnel closed')
         finally:
             self.tunnel = None
 
@@ -169,6 +173,7 @@ class VCC:
 
     # Get RMQclient
     def get_rmq_client(self, ses_id=None, is_multi_thread=False):
+        logger.debug('get_rmq_client')
         # Get credentials for RMQclient
         try:
             api = self.get_api()
@@ -187,6 +192,7 @@ class VCC:
 
     # Get RMQclient
     def get_rmq_connection(self, is_multi_thread=False):
+        logger.debug('get_rmq_connection')
         # Get credentials for RMQclient
         try:
             api = self.get_api()

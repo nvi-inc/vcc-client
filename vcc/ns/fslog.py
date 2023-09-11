@@ -1,13 +1,14 @@
 import os
+from pathlib import Path
 import re
 import logging
 import bz2
 from datetime import datetime
 
-from vcc import settings, update_object, set_logger, VCCError
-from vcc.server import VCC
+from vcc import settings
+from vcc.server import VCC, VCCError
 
-logger = logging.getLogger('vcc')
+logger = logging.getLogger('vccns')
 
 
 class BZ2log:
@@ -16,7 +17,7 @@ class BZ2log:
 
     @property
     def name(self):
-        return os.path.splitext(os.path.basename(self.path))[0] + '_full.log.bz2'
+        return self.path.stem + '_full.log.bz2'
 
     @property
     def format(self):
@@ -49,16 +50,17 @@ class SHORTlog:
 
 
 # Upload log file
-def upload(sta_id, ses_id, full=False, reduce=False):
-    name = f'{ses_id}{sta_id}.log'.lower()
-    path = os.path.join(settings.Folders.log, name)
-    if os.path.exists(path):
-        with VCC('NS') as vcc:
+def upload(vcc, sta_id, ses_id, full=False, reduce=False):
+    path = Path(settings.Folders.log, f'{ses_id}{sta_id}.log'.lower())
+    if path.exists():
+        try:
             t0 = datetime.now()
             file = BZ2log(path) if full else SHORTlog(path, reduce)
             rsp = vcc.get_api().post('/data/log', files=[('file', (file.name, file, file.format))])
-            logger.info(f'successfully uploaded {file.name} in {(datetime.now()-t0).total_seconds():.3f} seconds' \
-                if rsp else f'failed uploading {file.name}! [{rsp.text}]')
+            logger.info(f'successfully uploaded {file.name} in {(datetime.now()-t0).total_seconds():.3f} seconds'
+                        if rsp else f'failed uploading {file.name}! [{rsp.text}]')
+        except VCCError:
+            logger.warning(f'problem uploading {path.name}')
     else:
-        logger.warning(f'{path} does not exist!')
+        logger.warning(f'{path.stem} not uploaded. It does not exist!')
 

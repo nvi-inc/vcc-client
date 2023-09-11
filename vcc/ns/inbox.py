@@ -2,33 +2,58 @@ import json
 import re
 import traceback
 import logging
-from threading import Thread
+from threading import Thread, Event
 
 from vcc.messaging import RMQclientException
 from vcc.ns.processes import ProcessMaster, ProcessSchedule, ProcessLog, ProcessUrgent
 
-logger = logging.getLogger('vcc')
+logger = logging.getLogger('vccns')
 
 
 class InboxTracker(Thread):
 
     extract_name = re.compile('.*filename=\"(?P<name>.*)\".*').match
 
-    def __init__(self, sta_id, vcc):
+    def __init__(self, sta_id, vcc, comm_flag):
         super().__init__()
 
-        self.sta_id, self.vcc = sta_id, vcc
-        self.rmq_client = self.vcc.get_rmq_client()
+        self.sta_id, self.vcc, self.comm_flag = sta_id, vcc, comm_flag
+        try:
+            self.rmq_client = self.vcc.get_rmq_client()
+        except:
+            self.rmq_client = None
+            self.comm_flag.set()
+        self.stopped = Event()
 
     def run(self):
-        logger.info('Start monitoring VCC')
+        logger.info('inbox started')
         try:
-            self.rmq_client.monit(self.process_message)
-        except RMQclientException as exc:
-            logger.debug(f'End listener monit {str(exc)}')
+            while True:
+                try:
+                    self.rmq_client.monit(self.process_message)
+                except RMQclientException as exc:
+                    logger.debug(f'inbox communication reset - {self.stopped.is_set()}')
+                    if self.stopped.is_set():
+                        break
+                    Event().wait(10)
+                    try:
+                        self.rmq_client = self.vcc.get_rmq_client()
+                        logger.info('inbox communication reset')
+                    except:
+                        self.comm_flag.set()
+                        break
+                except Exception as exc:
+                    logger.debug(f'inbox problem {str(exc)}')
+                    Event().wait(10)
+        except Exception as exc:
+            logger.debug(f'big problem {str(exc)}')
+
+        logger.info('inbox stopped')
 
     def stop(self):
-        logger.info(f'Stop monitoring {self.sta_id} inbox')
+        logger.debug(f'inbox stop requested')
+        self.stopped.set()
+        Event().wait(1)
         self.rmq_client.close()
 
     def process_message(self, headers, data):
@@ -52,8 +77,9 @@ class InboxTracker(Thread):
                 elif code == 'urgent':
                     ProcessUrgent(self.vcc, self.sta_id, code, data).start()
             except Exception as exc:
-                logger.warning(f'invalid message {str(exc)}')
-                [logger.warning(line.strip()) for line in traceback.format_exc().splitlines()]
+                logger.warning(f'message invalid -  0 {str(exc)}')
+                for index, line in enumerate(traceback.format_exc().splitlines(), 1):
+                    logger.warning(f'message invalid - {index:2d} {line.strip()}')
 
         # Always acknowledge message
         self.rmq_client.acknowledge_msg()

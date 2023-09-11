@@ -22,7 +22,41 @@ from vcc.ns.drudg import drudg_it
 from vcc.ns.onoff import onoff
 from vcc.ns.fslog import upload
 
-logger = logging.getLogger('vcc')
+logger = logging.getLogger('vccns')
+
+
+def set_vcc_ns_logger(log_path='', prefix='', size=100):
+    # Functions needed to provide name of new compress file
+    def namer(name):
+        folder = os.path.dirname(name)
+        return os.path.join(folder, datetime.utcnow().strftime(f'{prefix}%Y-%m-%d.%H%M%S.gz'))
+
+    # Functions needed to created file rotator with gzip compression
+    def rotator(source, destination):
+        with open(source, "rb") as sf, open(destination, "wb") as df:
+            df.write(gzip.compress(sf.read(), 9))
+        os.remove(source)
+
+    logger = logging.getLogger('vcc')
+    logger.setLevel(logging.DEBUG)
+    logger.addFilter(ContextFilter())
+    formatter = logging.Formatter('%(utc)s - %(levelname)s - %(message)s')
+    # Add File handler
+    if log_path and Path(log_path).parent.exists():
+        fh = logging.handlers.RotatingFileHandler(log_path, 'a', size, 1)
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+        fh.rotator = rotator
+        fh.namer = namer
+        logger.addHandler(fh)
+    # Add console filter
+    if console:
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
+    return logger
+
 
 
 # Class used to monitor VCC inbox and DDOUT continuously
@@ -247,11 +281,12 @@ def main():
     if not settings.check_privilege('NS'):
         print('Only Network Station can run this action')
         sys.exit(0)
-    set_logger(console=args.debug)
+    set_vccns_logger()
     sta_id = settings.Signatures.NS[0]
 
     if args.action in ['start', 'restart']:
         set_logger('/usr2/oper/vcc.log', prefix='vcc-', console=args.debug)
+        logger.info('start service')
         getattr(sys.modules[__name__], args.action)()
     elif args.action == 'drudg':
         drudg_it(args.session, args.vex)
