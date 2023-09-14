@@ -143,7 +143,7 @@ def main():
 
     if not settings.check_privilege('NS'):
         print('Only Network Station can run this action')
-        sys.exit(0)
+        sys.exit(1)
     level = logging.DEBUG if args.debug else logging.INFO
     try:
         NSwatcher(settings.Signatures.NS[0], logging_level=level).start()

@@ -24,6 +24,7 @@ logger = logging.getLogger('vcc')
 class API:
     def __init__(self, group_id, config):
         self.base_url = f'{config["protocol"]}://{config["url"]}:{config["api_port"]}'
+        print(config)
         self.session = requests.Session()
         self.session.headers.update(signature.make(group_id))
         self.jwt_data = None
