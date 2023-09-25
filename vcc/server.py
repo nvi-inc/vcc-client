@@ -87,6 +87,7 @@ class VCC:
 
     # Enter function when 'with' is used
     def __enter__(self):
+        self.connect()
         return self
 
     # Exit function when 'with' is used
