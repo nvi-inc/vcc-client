@@ -25,6 +25,7 @@ def init(args):
         if path.exists():
             try:
                 data = toml.load(path.open())
+                print(data)
                 # Set some default folders
             except toml.TomlDecodeError as exc:
                 print(f'Error reading {path} [{str(exc)}]')
