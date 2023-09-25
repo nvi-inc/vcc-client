@@ -242,7 +242,7 @@ def main():
     parser.add_argument('-c', '--config', help='config file', required=False)
     parser.add_argument('-D', '--debug', help='debug mode is on', action='store_true')
     parser.add_argument('action',
-                        choices=['start', 'stop', 'status', 'restart', 'fetch', 'next', 'drudg', 'onoff', 'log'],
+                        choices=['monit', 'fetch', 'next', 'drudg', 'onoff', 'log'],
                         type=str.lower)
     action = parser.parse_known_args()[0].action
     if action in ['stop', 'status']:

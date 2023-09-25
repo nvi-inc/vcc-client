@@ -21,6 +21,7 @@ def init(args):
     setattr(this_module, 'args', args)
     for path in [Path(args.config if args.config else 'vcc.ctl'), Path('/usr2/control/vcc.ctl'),
                  Path(Path.home(), 'vcc.ctl')]:
+        print('INIT', str(path))
         if path.exists():
             try:
                 data = toml.load(path.open())
