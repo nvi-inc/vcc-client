@@ -8,8 +8,8 @@ from subprocess import Popen
 from tkinter import *
 from tkinter import ttk, font, messagebox
 
-from vcc import settings, VCCError, json_decoder, groups
-from vcc.server import VCC
+from vcc import settings, VCCError
+from vcc.client import VCC
 from vcc.session import Session
 
 
@@ -34,15 +34,14 @@ class Sessions(Thread):
         # Get session information from VLBI web service (vws)
         try:
             vcc = VCC()
-            api = vcc.get_api()
-            rsp = api.get('/sessions', params={'begin': self.begin, 'end': self.end, 'master': self.master})
+            rsp = vcc.api.get('/sessions', params={'begin': self.begin, 'end': self.end, 'master': self.master})
             if rsp:
                 self.codes = rsp.json()
                 for ses_id in self.codes:
-                    rsp = api.get(f'/sessions/{ses_id}')
+                    rsp = vcc.api.get(f'/sessions/{ses_id}')
                     if rsp:
                         session = Session(rsp.json())
-                        rsp = api.get(f'/schedules/{ses_id}', params={'select': 'summary'})
+                        rsp = vcc.api.get(f'/schedules/{ses_id}', params={'select': 'summary'})
                         if rsp:
                             session.update_schedule(rsp.json())
                         yield session
@@ -212,14 +211,13 @@ class SessionPicker:
         # Get session information from VLBI web service (vws)
         try:
             vcc = VCC()
-            api = vcc.get_api()
-            rsp = api.get('/sessions', params={'begin': self.begin, 'end': self.end, 'master': 'all'})
+            rsp = vcc.api.get('/sessions', params={'begin': self.begin, 'end': self.end, 'master': 'all'})
             if rsp:
                 for ses_id in rsp.json():
-                    rsp = api.get(f'/sessions/{ses_id}')
+                    rsp = vcc.api.get(f'/sessions/{ses_id}')
                     if rsp:
                         session = Session(rsp.json())
-                        rsp = api.get(f'/schedules/{ses_id}', params={'select': 'summary'})
+                        rsp = vcc.api.get(f'/schedules/{ses_id}', params={'select': 'summary'})
                         if rsp:
                             session.update_schedule(rsp.json())
                         yield session

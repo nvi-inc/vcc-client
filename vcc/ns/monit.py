@@ -4,13 +4,13 @@ import traceback
 import logging
 from threading import Thread, Event
 
-from vcc.messaging import RMQclientException
-from vcc.ns.processes import ProcessMaster, ProcessSchedule, ProcessLog, ProcessUrgent
+from vcc.client import RMQclientException
+from vcc.ns.processes import ProcessMaster, ProcessSchedule, ProcessLog, ProcessMsg, ProcessUrgent
 
-logger = logging.getLogger('vccns')
+logger = logging.getLogger('vcc')
 
 
-class InboxTracker(Thread):
+class InboxMonitor(Thread):
 
     extract_name = re.compile('.*filename=\"(?P<name>.*)\".*').match
 
@@ -73,9 +73,11 @@ class InboxTracker(Thread):
                 elif code == 'schedule':
                     ProcessSchedule(self.vcc, self.sta_id, data).start()
                 elif code == 'log':
-                    ProcessLog(self.vcc, self.sta_id, code, data).start()
+                    ProcessLog(self.vcc, self.sta_id, data).start()
+                elif code == 'msg':
+                    ProcessMsg(self.vcc, self.sta_id, data).start()
                 elif code == 'urgent':
-                    ProcessUrgent(self.vcc, self.sta_id, code, data).start()
+                    ProcessUrgent(self.vcc, self.sta_id, data).start()
             except Exception as exc:
                 logger.warning(f'message invalid -  0 {str(exc)}')
                 for index, line in enumerate(traceback.format_exc().splitlines(), 1):

@@ -17,10 +17,12 @@ class Session:
         make_object(data, self)
 
         self.end = self.start + timedelta(seconds=self.duration)
+        self.db_name = f'{self.start.strftime("%Y%m%d")}-{self.code.lower()}'
 
-    def __str__(self):
+    def __str_old__(self):
         oc = self.operations.upper() if self.operations else 'N/A'
         cor = self.correlator.upper() if self.correlator else 'N/A'
+        ac = self.analysis.upper() if self.analysis else 'N/A'
         delta = self.start - datetime.utcnow()
         dt, unit = int(delta.days), 'day'
         upcoming, dt = dt >= 0, abs(dt)
@@ -31,7 +33,20 @@ class Session:
         start, ago = ('starts in', '') if upcoming else ('started', 'ago')
         unit = unit+'s' if dt > 1 else unit
         return f'{self.code:8s} {self.start} {self.duration/3600:5.2f} ' \
-               f'{oc:<4s} {cor:<4s} - {start} {dt:2d} {unit} {ago}'
+               f'{oc:<4s} {cor:<4s} {ac:<4s}- {start} {dt:2d} {unit} {ago}'
+
+    def __str__(self):
+        included = f'{"".join(list(map(str.capitalize, self.included)))}'
+        removed = f' -{"".join(list(map(str.capitalize, self.removed)))}' if self.removed else ''
+        return f'{self.code.upper():12s} {self.type.upper():12s}{self.start.strftime("%Y-%m-%d %H:%M")} ' \
+               f'{included + removed:40s}{self.operations.upper():4s} ' \
+               f'{self.correlator.upper():4s} {self.analysis.upper():4s} {self.db_name}'
+
+    def short(self):
+        included = f'{"".join(list(map(str.capitalize, self.included)))}'
+        removed = f' -{"".join(list(map(str.capitalize, self.removed)))}' if self.removed else ''
+        return f'{self.code.upper():12s} {self.type.upper():12s}{self.start.strftime("%Y-%m-%d %H:%M")} ' \
+               f'{included + removed}'
 
     def update_schedule(self, data):
         self.schedule = make_object(data) if data else None

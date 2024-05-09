@@ -5,15 +5,12 @@ import re
 import logging
 import traceback
 
-from psutil import process_iter, AccessDenied, NoSuchProcess
-
-from vcc import VCCError, json_decoder
-from vcc.messaging import RMQclientException
-from vcc.ns import notify
+from vcc import VCCError, json_decoder, vcc_cmd
+from vcc.client import RMQclientException
+from vcc.ns import get_ddout_log
 from vcc.ns.onoff import post_onoff
-from vcc.ns.processes import ProcessLog
 
-logger = logging.getLogger('vccns')
+logger = logging.getLogger('vcc')
 
 
 # Read records from log file opened by ddout
@@ -21,9 +18,8 @@ class DDoutScanner(Thread):
     key_words: set = {'warm', 'missed', 'issue', 'fmout-gps', 'gps-fmout', 'late'}
 
     is_pcfs = re.compile(r'^(?P<time>^\d{4}\.\d{3}\.\d{2}:\d{2}:\d{2}\.\d{2})(?P<data>.*)$').match
-    is_header = re.compile(r'(?P<key>#onoff#    source)(?P<data>.*)$').match
+    is_header = re.compile(r'(?P<key>#onoff# {4}source)(?P<data>.*)$').match
     is_onoff = re.compile(r'(?P<key>#onoff#VAL)(?P<data>.*)$').match
-    is_info = re.compile(r';\"(?P<key>ses-info):(?P<data>.*)$').match
     keys = [(re.compile(f'{separator}(?P<key>{key})(?P<data>.*)$').match, msg) for (separator, key, msg)
             in [(':', 'exper_initi', 'schedule loaded {ses_id}'),
                 (':', 'sched_end', 'schedule ended'),
@@ -50,12 +46,13 @@ class DDoutScanner(Thread):
             self.log.close()
             if self.ses_id:
                 self.send_msg({'status': f'{os.path.basename(self.active)} closed', 'session': self.ses_id})
-                ProcessLog(self.vcc, self.sta_id, 'full_log', {'session': self.ses_id})
+                logger.info(f'sending {self.ses_id} full log to VCC')
+                vcc_cmd('vccns', f'log -q {self.ses_id}')
 
         self.active = self.log = None
 
     def is_valid_session(self, ses_id):
-        rsp = self.vcc.get_api().get(f'/sessions/{ses_id}')
+        rsp = self.vcc.api.get(f'/sessions/{ses_id}')
         if rsp:
             data = json_decoder(rsp.json())
             return data.get('code', '').lower() == ses_id.lower() if data else False
@@ -75,45 +72,17 @@ class DDoutScanner(Thread):
             name = os.path.basename(path)
             self.close_log()
             self.active, self.log = path, open(path, 'r', encoding="utf8", errors="ignore")
+            try:
+                self.log.seek(0, 2)
+                self.log.seek(max(self.log.tell() - 10000, 0), 0)
+            except Exception as exc:
+                logger.debug(str(exc))
             ses_id = name[:-6] if name.endswith(f'{self.sta_id.lower()}.log') else None
             self.ses_id = ses_id if ses_id and self.is_valid_session(ses_id) else None
-            logger.debug(f'OPEN LOG {path} SES_ID {self.ses_id}')
             if self.ses_id:
                 self.send_msg({'status': f'{name} opened', 'session': self.ses_id})
+            logger.debug(f'OPEN LOG {path} SES_ID {self.ses_id}')
         return self.last_time.get(self.active, datetime.utcnow() - timedelta(seconds=2))
-
-    # Get the path of the file opened by ddout
-    @staticmethod
-    def get_ddout_log():
-        for proc in process_iter(['name', 'pid']):
-            if proc.info['name'] == 'ddout':
-                try:
-                    files = [file.path for file in proc.open_files() if file.path.startswith('/usr2/log')]
-                    return files[0] if files else None
-                except (NoSuchProcess, AccessDenied):
-                    return None
-        return None
-
-    # Check if ses-info message to be sent to vcc
-    def is_info_record(self, info):
-        rec = self.is_info(info)
-        if not rec:
-            return False
-        data = rec['data'].split(',')
-        ses_id, key_word = self.ses_id, data[0].lower()
-        if len(data) > 1 and data[1].lower() in self.key_words:
-            ses_id, key_word = data[0], data[1].lower()
-        if not ses_id:
-            notify(f'Invalid ses-info record', f'Session code is required', icon='warning')
-        elif ses_id != self.ses_id and not self.test_session(ses_id):
-            notify(f'Invalid ses-info record', f'{ses_id} is not valid session<br>or<br>{self.sta_id} not in {ses_id}',
-                   icon='warning')
-        elif key_word not in self.key_words:
-            notify(f'Invalid ses-info record)', f'Valid key words are:<br>{"<br>".join(self.key_words)}',
-                   icon='warning')
-        else:
-            self.send_msg({'status': f'{rec["key"]}:{rec["data"]}', 'session': ses_id})
-        return True
 
     # Check if ONOFF header
     def is_onoff_header(self, info):
@@ -135,7 +104,7 @@ class DDoutScanner(Thread):
 
     # Send ONOFF record to VCC
     def send_onoff(self):
-        self.onoff = post_onoff(self.vcc.get_api(), self.onoff)
+        self.onoff = post_onoff(self.vcc.api, self.onoff)
 
     # Send station status to VCC Messenger
     def send_status(self, info):
@@ -164,8 +133,7 @@ class DDoutScanner(Thread):
         while not self.stopped.wait(0.5):
             try:
                 self.rmq.keep_connection_alive()
-                path = self.get_ddout_log()
-                if not path:
+                if not (path := get_ddout_log()):
                     self.send_onoff()
                     self.close_log()
                 else:
@@ -175,8 +143,7 @@ class DDoutScanner(Thread):
                         if rec:
                             timestamp, info = datetime.strptime(rec['time'], '%Y.%j.%H:%M:%S.%f'), rec['data']
                             if timestamp >= last:
-                                if not self.is_info_record(info) and not self.is_onoff_header(info) \
-                                        and not self.is_onoff_record(timestamp, info):
+                                if not self.is_onoff_header(info) and not self.is_onoff_record(timestamp, info):
                                     self.send_onoff()
                                     self.send_status(info)
                                 self.last_time[self.active] = timestamp

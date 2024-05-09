@@ -1,9 +1,6 @@
 import sys
-from pathlib import Path
 
-import toml
-
-from vcc import make_object, groups
+from vcc import make_object, get_config_data
 
 
 # Flag configuration problems
@@ -19,21 +16,21 @@ def init(args):
 
     # Store all arguments under args variable
     setattr(this_module, 'args', args)
-    for path in [Path(args.config if args.config else 'vcc.ctl'), Path('/usr2/control/vcc.ctl'),
-                 Path(Path.home(), 'vcc.ctl')]:
-        if path.exists():
-            try:
-                data = toml.load(path.open())
-                # Set some default folders
-            except toml.TomlDecodeError as exc:
-                print(f'Error reading {path} [{str(exc)}]')
-                exit(0)
-            # Add information in config file to this module
-            make_object(data, this_module)
-            return args
+    if data := get_config_data(args.config):
+        # Add information in config file to this module
+        make_object(data, this_module)
+        return args
     print('no valid configuration file')
 
 
-def check_privilege(group_id):
+def check_privilege(groups):
     this_module = sys.modules[__name__]
-    return hasattr(this_module.Signatures, group_id)
+    for grp in [groups] if isinstance(groups, str) else groups:
+        if hasattr(this_module.Signatures, grp):
+            return True
+    return False
+
+
+def get_user_code(grp):
+    this_module = sys.modules[__name__]
+    return info[0] if (info := getattr(this_module.Signatures, grp, None)) else None

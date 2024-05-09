@@ -1,8 +1,7 @@
 from datetime import datetime, timedelta
 
-from vcc import settings, signature, VCCError, groups
-from vcc.messaging import RMQclientException
-from vcc.server import VCC
+from vcc import settings, signature, VCCError, vcc_groups
+from vcc.client import VCC, RMQclientException
 
 
 # Test that inbox is available
@@ -14,25 +13,22 @@ def test_inbox(vcc, group_id, session=None):
     try:
         msg = vcc.get_rmq_client(session)
         print(f'is available! Response time is {msg.alive():.3f} seconds')
-
     except (VCCError, RMQclientException) as exc:
         print(f'NOT available! [{str(exc)}]')
 
 
 # Test if users in configuration file are valid
 def test_users():
-    text = {'CC': 'Coordinating Center {}', 'OC': "Operations Center {}", 'AC': 'Analysis Center {}',
-            'CO': 'Correlator {}', 'NS': 'Network Station {}', 'DB': 'Dashboard'}
-    for group_id in groups:
+    for group_id, name in vcc_groups.items():
         code = getattr(settings.Signatures, group_id, (None, None, None))[0]
         if code:
-            print(text[group_id].format(code), end=' ')
+            print(f'{name} {code}', end=' ')
             try:
                 with VCC(group_id) as vcc:
                     api = vcc.get_api()
                     rsp = api.get('/users/valid', headers=signature.make(group_id))
                     if not rsp or not signature.validate(rsp):
-                        raise VCCError(f' has invalid response {rsp.text}')
+                        raise VCCError(f'has invalid response {rsp.text}')
                     print('is valid!', end=' ')
                     ses_id = None
                     # Testing DB needs a session code. Get the first upcoming session

@@ -1,8 +1,7 @@
 from datetime import datetime, timedelta
 
-from vcc import settings, signature, VCCError, groups
-from vcc.messaging import RMQclientException
-from vcc.server import VCC, get_server
+from vcc import settings, signature, VCCError, vcc_groups
+from vcc.client import VCC, RMQclientException
 
 
 # Test that inbox is available
@@ -18,7 +17,7 @@ def test_inbox(vcc, group_id, session=None):
 
 # Test if users in configuration file are valid
 def test_users():
-    for group_id in groups:
+    for group_id in vcc_groups:
         if hasattr(settings.Signatures, group_id):
             print(f'Test on {group_id} user ', end='')
 

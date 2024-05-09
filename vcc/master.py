@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from tkinter import *
 from tkinter import ttk, font, messagebox
 
-from vcc import json_decoder, VCCError
-from vcc.server import VCC
+from vcc import json_decoder, VCCError, vcc_cmd
+from vcc.client import VCC
 from vcc.session import Session
 
 COLUMNS = ['type', 'date', 'code', 'doy', 'time', 'duration', 'stations', 'operations',
@@ -30,22 +30,17 @@ def update_network(lines):
     # Get existing information from VOC
     try:
         with VCC('CC') as vcc:
-            api = vcc.get_api()
-            rsp = api.get('/stations')
-            if not rsp:
+            if not (rsp := vcc.api.get('/stations')):
                 raise VCCError(rsp.text)
             old = {data['code']: data for data in rsp.json() if data.pop('updated')}
             if network == old:
                 raise VCCError('No changes in network stations')
-            added = {code: value for (code, value) in network.items() if old.get(code) != value}
-            if added:
-                rsp = api.post('/stations', data=added)
-                if not rsp:
+            if added := {code: value for (code, value) in network.items() if old.get(code) != value}:
+                if not (rsp := vcc.api.post('/stations', data=added)):
                     raise VCCError(rsp.text)
-                [print(f'{index:4d} {sta} {status}') for index, (sta, status) in enumerate(rsp.json().items(), 1)]
+                print("\n".join([f'{i:4d} {sta} {status}' for i, (sta, status) in enumerate(rsp.json().items(), 1)]))
             for index, sta_id in enumerate([code for code in old if code not in network], 1):
-                rsp = api.delete(f'/stations/{sta_id}')
-                if not rsp:
+                if not (rsp := vcc.api.delete(f'/stations/{sta_id}')):
                     raise VCCError(rsp.text)
                 print(f'{index:4d} {sta_id} {rsp.json()[sta_id]}')
     except VCCError as exc:
@@ -74,9 +69,8 @@ def update_codes(lines):
     if data:
         try:
             with VCC('CC') as vcc:
-                api = vcc.get_api()
                 for key, name in codes.items():
-                    rsp = api.post(f'/catalog/{name}', data=data[key])
+                    rsp = vcc.api.post(f'/catalog/{name}', data=data[key])
                     if not rsp:
                         raise VCCError(rsp.text)
                     print(f'{len([code for code, status in rsp.json().items() if status == "updated"])} '
@@ -119,12 +113,15 @@ def update_master(lines):
 
     # Post data to VCC
     try:
-        vcc = VCC('CC')
-        rsp = vcc.get_api().post('/sessions', data=sessions)
-        if not rsp:
-            raise VCCError(rsp.text)
-        for ses_id, status in rsp.json().items():
-            print(ses_id, status)
+        with VCC('CC') as vcc:
+            if rsp := vcc.api.post('/sessions', data=sessions):
+                for ses_id, status in rsp.json().items():
+                    print(ses_id, status)
+            elif ans := rsp.json():
+                for key, info in ans.items():
+                    print(f'{key}: {info}')
+            else:
+                print(rsp.text)
     except VCCError as exc:
         print(str(exc))
 
@@ -180,15 +177,19 @@ class SessionViewer:
 
     def __init__(self, ses_id):
 
-        self.root, self.vcc = Tk(), VCC('CC')
-        self.is_intensive = BooleanVar()
         self.type = self.start = self.duration = self.network = None
         self.operations = self.correlator = self.analysis = None
 
         try:
+            self.root, self.vcc = Tk(), VCC('CC')
+            self.is_intensive = BooleanVar()
+            self.vcc.connect()
             self.session = self.get_session(ses_id)
         except VCCError as exc:
-            messagebox.showerror('Failed contacting VCC', str(exc))
+            vcc_cmd('message-box', f"-t 'Failed contacting VCC' -m '{str(exc)}' -i 'warning'")
+            exit(0)
+        except TclError as exc:
+            vcc_cmd('message-box', f"-t 'TK problem' -m '{str(exc)}' -i 'warning'")
             exit(0)
 
         self.oc = self.get_options('/catalog/operations')
@@ -273,7 +274,7 @@ class SessionViewer:
 
     def get_session(self, ses_id):
         try:
-            rsp = self.vcc.get_api().get(f'/sessions/{ses_id}')
+            rsp = self.vcc.api.get(f'/sessions/{ses_id}')
             if rsp:
                 return Session(json_decoder(rsp.json()))
         except VCCError:
@@ -282,7 +283,7 @@ class SessionViewer:
 
     def get_options(self, url):
         try:
-            rsp = self.vcc.get_api().get(url)
+            rsp = self.vcc.api.get(url)
             if rsp:
                 return [item['code'].strip() for item in json_decoder(rsp.json())]
         except VCCError:
@@ -291,7 +292,7 @@ class SessionViewer:
 
     def get_stations(self):
         try:
-            rsp = self.vcc.get_api().get('/stations')
+            rsp = self.vcc.api.get('/stations')
             if rsp:
                 return [item['code'].strip() for item in json_decoder(rsp.json())]
         except VCCError:
@@ -366,7 +367,7 @@ class SessionViewer:
             data = {code: getattr(self.session, code) for code in COLUMNS if hasattr(self.session, code)}
             data = dict(**data, **{'start': self.session.start, 'master': self.session.master,
                                    'stations': self.network.get_text()})
-            rsp = self.vcc.get_api().put(f'/sessions/{self.session.code}', data=data)
+            rsp = self.vcc.api.put(f'/sessions/{self.session.code}', data=data)
             if not rsp:
                 raise VCCError(f'VCC response {rsp.status_code}\n{rsp.text}')
             status = json_decoder(rsp.json())[self.session.code]
@@ -382,13 +383,14 @@ class SessionViewer:
 
 def delete_session(ses_id):
     try:
-        vcc = VCC('CC')
-        api = vcc.get_api()
-        rsp = api.get(f'/sessions/{ses_id.lower()}')
-        if not rsp:
-            raise VCCError(rsp.text)
-        rsp = api.delete(f'/sessions/{ses_id.lower()}')
-        print(rsp.text)
+        with VCC('CC') as vcc:
+            if rsp := vcc.api.get(f'/sessions/{ses_id.lower()}'):
+                rsp = vcc.api.delete(f'/sessions/{ses_id.lower()}')
+            try:
+                for key, info in rsp.json().items():
+                    print(f'{key}: {info}')
+            except:
+                print(rsp.text)
     except VCCError as exc:
         print(str(exc))
 
@@ -397,43 +399,30 @@ def view_session(ses_id):
     viewer = SessionViewer(ses_id)
 
 
-def main():
-    import argparse
+def master(param, delete=False):
     from vcc import settings
-
-    parser = argparse.ArgumentParser(description='Access VCC functionalities')
-    parser.add_argument('-c', '--config', help='config file', required=False)
-    parser.add_argument('-d', '--delete', help='delete', action='store_true')
-    parser.add_argument('param', help='master file or session code')
-
-    args = settings.init(parser.parse_args())
 
     # Check that user has right privileges
     if not settings.check_privilege('CC'):
-        print(f'Only Coordinating center can update master data on VCC')
+        vcc_cmd('message-box',
+                "-t 'NO privilege for this action' -m 'Only Coordinating Center can update master' -i 'warning'")
         return
 
-    if args.delete:
-        delete_session(args.param)
+    if delete:
+        delete_session(param)
         return
 
-    path = Path(args.param)
-    if path.exists():
+    if (path := Path(param)).exists():
         # Open file and get what type of file
         with open(path) as f:
             data = f.read()
         if 'MULTI-AGENCY' in data:
             update_master(data.splitlines())
-        elif 'ns-codes.txt' in data:
-            update_codes(data.splitlines())
         elif 'IVS Master File Format Definition' in data:
+            update_codes(data.splitlines())
+        elif 'ns-codes.txt' in data:
             update_network(data.splitlines())
         else:
             print(f'{path.name} is not a valid master, master-format or ns-codes file.')
-    elif args.param == path.stem:  # This most be a session
-        view_session(args.param)
-
-
-if __name__ == '__main__':
-
-    sys.exit(main())
+    elif param == path.stem:  # This most be a session
+        view_session(param)

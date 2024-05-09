@@ -1,44 +1,50 @@
 import re
-import os
 import sys
 import signal
 import logging
-import time
-import json
 import shutil
 from pathlib import Path
 from datetime import datetime
-from psutil import Process, process_iter
 
 from threading import Thread, Event
 
-from vcc import VCCError, settings, set_logger
-from vcc.server import VCC
-from vcc.session import Session
-from vcc.messaging import RMQclientException
-from vcc.ns import notify
-from vcc.ns.inbox import InboxTracker
+from vcc import VCCError, settings
+from vcc.client import VCC, RMQclientException
+from vcc.ns.monit import InboxMonitor
 from vcc.ns.ddout import DDoutScanner
 
-logger = logging.getLogger('vccns')
+logger = logging.getLogger('vcc')
+
+"""
+VCC NS client monitoring LOG file and NS inbox.
+DDoutScanner monitors the current log and send specific information to VCC
+InboxTracker monitors NS inbox on VCC and dispatches message to appropriate function
+"""
 
 
 class ContextFilter(logging.Filter):
+    """
+    Class to format UTC time in log
+    """
     def filter(self, record):
-        setattr(record, 'utc', datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3])
+        record.utc = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         return True
 
 
 class VCChandler(logging.handlers.WatchedFileHandler):
+    """
+    Class checking if log has been moved or deleted. Re-open it if needed
+    """
     def __init__(self, filename):
-        self.path = filename if isinstance(filename, Path) else Path(filename)
+        self.path = Path(filename)
         self.make_log()
         super().__init__(filename)
 
     def make_log(self):
+        Path(self.path.parent).mkdir(exist_ok=True)
         if not self.path.exists():
             open(self.path, 'w').close()
-        os.chmod(self.path, 0o664)
+        self.path.chmod(0o664)
         shutil.chown(self.path, 'oper', 'rtx')
 
     def reopenIfNeeded(self):
@@ -48,11 +54,13 @@ class VCChandler(logging.handlers.WatchedFileHandler):
             self.make_log()
 
 
-# Class used to monitor VCC inbox and DDOUT continuously
 class NSwatcher(Thread):
-
+    """
+    Class used to monitor VCC inbox and DDOUT continuously
+    ddout and inbox are using separated threads
+    """
     extract_name = re.compile('.*filename=\"(?P<name>.*)\".*').match
-    which = {'ddout': DDoutScanner, 'inbox': InboxTracker}
+    which = {'ddout': DDoutScanner, 'inbox': InboxMonitor}
 
     def __init__(self, sta_id, logging_level=logging.INFO):
 
@@ -60,7 +68,8 @@ class NSwatcher(Thread):
 
         signal.signal(signal.SIGTERM, self.terminate)
 
-        handler = VCChandler(Path(settings.Folders.log, 'vcc', 'vcc-ns.log'))
+        # define logger parameters
+        handler = VCChandler(Path(settings.Folders.log, 'vcc', 'vccmon.log'))
         handler.setFormatter(logging.Formatter('%(utc)s [%(levelname)s] %(message)s'))
         logger.addFilter(ContextFilter())
         logger.setLevel(logging_level)
@@ -76,7 +85,7 @@ class NSwatcher(Thread):
                 logger.debug(f'{name} is {"alive" if self.threads[name].is_alive() else "dead"}')
                 self.threads[name].stop()
         except (NameError, AttributeError, RMQclientException) as exc:
-            logger.debug(f'problem stopping {name} - {str(exc)}')
+            logger.warning(f'problem stopping {name} - {str(exc)}')
 
     def run(self):
         logger.info(f'vcc-ns started {self.native_id}')
@@ -84,6 +93,7 @@ class NSwatcher(Thread):
         vcc, problem, show_msg = VCC('NS'), Event(), Event()
         problem.set()
         show_msg.set()
+        logger.info(sys.argv[0])
         while not self.stopped.wait(1.0):
             try:
                 if problem.is_set():
@@ -131,6 +141,15 @@ class NSwatcher(Thread):
         self.stopped.set()
 
 
+def inbox_in_use():
+    with VCC('NS') as vcc:
+        try:
+            vcc.get_rmq_client().alive()
+            return False
+        except (VCCError, RMQclientException):
+            return True
+
+
 def main():
 
     import argparse
@@ -141,20 +160,21 @@ def main():
 
     args = settings.init(parser.parse_args())
 
-    if not settings.check_privilege('NS'):
+    if not (sta_id := settings.get_user_code('NS')):
         print('Only Network Station can run this action')
+        sys.exit(1)
+    if inbox_in_use():
+        print(f'The inbox for {sta_id} is already monitored!')
         sys.exit(1)
     level = logging.DEBUG if args.debug else logging.INFO
     try:
-        NSwatcher(settings.Signatures.NS[0], logging_level=level).start()
+        NSwatcher(sta_id, logging_level=level).start()
     except Exception as exc:
-        print('problem', str(exc))
         logger.debug(f'end {str(exc)}')
         sys.exit(1)
     sys.exit(0)
 
 
 if __name__ == '__main__':
-    import sys
 
     sys.exit(main())

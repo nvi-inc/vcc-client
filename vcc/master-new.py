@@ -7,7 +7,7 @@ from tkinter import *
 from tkinter import ttk, font, messagebox
 
 from vcc import json_decoder, VCCError
-from vcc.server import VCC
+from vcc.client import VCC
 from vcc.session import Session
 
 COLUMNS = ['type', 'date', 'code', 'doy', 'time', 'duration', 'stations', 'operations',

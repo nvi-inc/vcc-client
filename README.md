@@ -2,7 +2,7 @@
 VLBI Communications Center (VCC) client
 ---------------------------------------
 
-The VLBI Communications Center (VCC) client software is used to upload/retreive information on VCC server.
+The VLBI Communications Center (VCC) client software is used to upload/retrieve information on VCC server.
 
 
 The VCC access is based on roles. There are 6 possible roles. Each user has a special key for each role.<br>
@@ -14,8 +14,8 @@ The VCC access is based on roles. There are 6 possible roles. Each user has a sp
 6 - Dashboard (DB).          Any user.<br>
 
 The special keys are store in a vcc.ctl configuration file.<br>
-To get that file, you need to send your public ssh key to ivscc@nviinc.com along with the specific roles and group of your organisation.<br>
-Many keys can be stored in the control file.
+To get that file, you need to send your public ssh key to mario.berube@nviinc.com along with the specific roles and group of your organisation.<br>
+Many keys can be stored in the same control file.
 
 You may create a pair of key using
 

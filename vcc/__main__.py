@@ -1,73 +1,156 @@
-from datetime import datetime, timedelta
-import json
-from subprocess import Popen
+import argparse
+import sys
+from pathlib import Path
 
-from vcc import settings
-from vcc.server import VCC
-from vcc.utils import show_session, show_next, upload_schedule_files
+from vcc import help, settings, show_version
+from vcc.client import VCC
+from vcc.dashboard import Dashboard
+from vcc.downtime import downtime
+from vcc.inbox import check_inbox
+from vcc.master import master
+from vcc.session import Session
+from vcc.sumops import sumops
+from vcc.urgent import VCCMessage
+from vcc.users import test_users
+from vcc.utils import (fetch_files, master_types, upcoming_sessions,
+                       upload_schedule_files)
 
-masters = ['all', 'std', 'int']
 
-
-def show_version():
-    import pkg_resources  # part of setuptools
-    print('vcc version', pkg_resources.require("vcc")[0].version)
-
-
-def upcoming(sta_id=None, master='all', days=7):
+# Output session information
+def show_session(ses_id):
     with VCC() as vcc:
-        api = vcc.get_api()
-        now = datetime.utcnow()
-        if sta_id:
-            title = f'List of upcoming sessions for {sta_id}'
-            sessions = api.get(f'/sessions/next/{sta_id}', params={'days': days}).json()
+        if rsp := vcc.api.get(f'/sessions/{ses_id}'):
+            print(Session(rsp.json()))
         else:
-            ses_type = dict(int='intensives ', std='24H ').get(master, '')
-            title = f'List of upcoming {ses_type}sessions'
-            today = datetime.utcnow().date()
-            begin, end = today - timedelta(days=2), today + timedelta(days=days)
-            rsp = api.get('/sessions', params={'begin': begin, 'end': end, 'master': master})
-            sessions = [api.get(f'/sessions/{ses_id}').json() for ses_id in rsp.json()]
+            print(f'Could not find information on {ses_id}')
 
-        sessions = [data for data in sessions if datetime.fromisoformat(data['start']) > now]
-        message = json.dumps(sessions)
-        cmd = f"vcc-message -s -db \'{title}\' \'{message}\'"
-        Popen([cmd], shell=True, stdin=None, stdout=None, stderr=None, close_fds=True)
+
+# Add list of standard option to parser
+def add_arguments(parser):
+    parser.add_argument('-s', '--start', help='start date for first session', required=False)
+    parser.add_argument('-e', '--end', help='end date for last session', required=False)
+    parser.add_argument('-d', '--days', help='number of days', type=int, default=7, required=False)
+    parser.add_argument('-D', '--display', help='display name', required=False)
+
+
+# Generate a parser for list of sessions
+def sessions_args():
+    parser = argparse.ArgumentParser(description='Access VCC functionalities')
+    parser.add_argument('-c', '--config', help='config file', required=False)
+    add_arguments(parser)
+    parser.add_argument('code', help='None or station code', nargs='?', default='')
+    return parser.parse_args(filter_input())
+
+
+# Generate a parser for specific session
+def session_args():
+    parser = argparse.ArgumentParser(description='Access VCC functionalities')
+    parser.add_argument('-c', '--config', help='config file', required=False)
+    parser.add_argument('code', help='Session code')
+    return parser.parse_args(filter_input())
+
+
+def filter_input():
+    name = Path(sys.argv[0]).name
+    param = [] if name == 'vcc' else [name]
+    param.extend(sys.argv[1:])
+    return param
 
 
 def main():
-    import argparse
-
-    parser = argparse.ArgumentParser(description='Access VCC functionalities')
+    parser = argparse.ArgumentParser(description='Access VCC functionalities', exit_on_error=False)
     parser.add_argument('-c', '--config', help='config file', required=False)
-    group = parser.add_mutually_exclusive_group(required=False)
-    group.add_argument('-V', '--version', help='display version', action='store_true', required=False)
-    group.add_argument('-s', '--sked', help='update VCC with sked files', nargs='+', required=False)
-    group.add_argument('-u', '--upload', help='update VCC with sked files', nargs='+', required=False)
-    group.add_argument('-r', '--report', help='update VCC with sked files', nargs='+', required=False)
-    parser.add_argument('param', help='station or session code', nargs='?')
 
-    args, _ = parser.parse_known_args()
+    # Create subprocesses
+    subparsers = parser.add_subparsers(dest='action')
+    # VERSION and TEST subprocesses
+    subparsers.add_parser('version', help='Get version of VCC package')
+    subparsers.add_parser('test', help='Test if config file has valid signatures')
+    # INBOX subprocess
+    sub = subparsers.add_parser('inbox', help='Monitor or Read inbox for group')
+    sub.add_argument('-r', '--read', help='read messages in inbox', action='store_true')
+    sub.add_argument('group', help='group id of inbox', choices=['CC', 'OC', 'AC', 'CC', 'NS'], type=str.upper)
+    # SKED subprocess
+    sub = subparsers.add_parser('sked', help='Upload schedule files (Operations Center only)')
+    sub.add_argument('-q', '--quiet', help='do not notify users', action='store_true')
+    sub.add_argument('files', help='schedule files to upload', nargs='+')
+    # FETCH subprocess
+    sub = subparsers.add_parser('fetch', help='retrieve files')
+    sub.add_argument('param', help='Session code or file name')
+    # MASTER subprocess
+    sub = subparsers.add_parser('master', help='Update master (Coordinating Center only)')
+    sub.add_argument('-d', '--delete', help='delete the session', action='store_true', required=False)
+    sub.add_argument('param', help='master file or session to modify')
+    # DASHBOARD subprocess
+    sub = subparsers.add_parser('dashboard', help='Use dashboard to monitor session')
+    sub.add_argument('session', help='session code')
+    # DOWNTIME subprocess
+    sub = subparsers.add_parser('downtime', help='Use dashboard to monitor session')
+    sub.add_argument('-r', '--report', help='output data in csv format', action='store_true')
+    sub.add_argument('station', help='station code', nargs='?')
+    # SUMOPS subprocess
+    sub = subparsers.add_parser('sumops', help='Generate SUMOPS report')
+    group = sub.add_mutually_exclusive_group()
+    group.add_argument('-s', '--sked', help='skd schedule file', dest='schedule', required=False)
+    group.add_argument('-v', '--vex', help='vex schedule file', dest='schedule', required=False)
+    group.add_argument('-r', '--report', action='store_true', required=False)
+    sub.add_argument('session', help='session code', nargs='?')
+    sub.add_argument('station', help='station code', nargs='?')
 
-    args = settings.init(parser.parse_args())
+    # HELP subprocess
+    sub = subparsers.add_parser('help', help='VCC help')
+    sub.add_argument('subject', help='subject', nargs='?', default='')
+    # urgent subprocess
+    sub = subparsers.add_parser('urgent', help='start urgent interface')
 
-    if args.version:
-        show_version()
-    elif args.param in ('int', 'std', 'all'):
-        upcoming(master=args.param)  # SessionPicker(args.viewer).exec()
-    elif args.sked:
-        upload_schedule_files(args.sked, notify=True) if settings.check_privilege('OC') else \
-            print('Only an Operations Center can upload schedules')
-    elif args.upload:
-        upload_schedule_files(args.upload, notify=False) if settings.check_privilege('OC') else \
-            print('Only an Operations Center can upload schedules')
-    elif args.param:
-        upcoming(sta_id=args.param) if len(args.param) == 2 else show_session(args.param)
-    else:
-        upcoming(master='all')
+    # Session type subprocess
+    for code, mtype in master_types.items():
+        sub = subparsers.add_parser(code, help=f'Get list of {mtype} sessions')
+        add_arguments(sub)
+        sub.add_argument('station', help='None or station code', nargs='?', default='')
+    # Main options
+    add_arguments(parser)
+    parser.add_argument('code', help='None or station code', nargs='?', default='')
+    try:
+        args = parser.parse_args(filter_input())
+        settings.init(args)
+        if args.action == 'version':  # Show version
+            show_version()
+        elif args.action == 'help':  # Help
+            help(args.subject)
+        elif args.action == 'test':  # Run VCC test for config file
+            test_users()
+        elif args.action == 'sked':  # Upload schedule file
+            upload_schedule_files(args.files, notify=not args.quiet)
+        elif args.action == 'master':
+            master(args.param, args.delete)
+        elif args.action == 'dashboard':
+            Dashboard(args.session).exec()
+        elif args.action == 'sumops':
+            sumops(args)
+        elif args.action == 'fetch':
+            fetch_files(args.param)
+        elif args.action == 'urgent':
+            VCCMessage().exec()
+        elif args.action == 'inbox':
+            check_inbox(args.group, args.read)
+        elif args.action == 'downtime':
+            downtime(args.station, args.report)
+        elif args.action in master_types.keys():
+            upcoming_sessions(args.action, args.station, args)
+        else:
+            upcoming_sessions('all', args.code, args)
+    except argparse.ArgumentError:
+        args = sessions_args()
+        if len(args.code) not in (0, 2):
+            settings.init(session_args())
+            show_session(args.code)
+        else:
+            settings.init(args)
+            upcoming_sessions('all', args.code, args)
+    sys.exit(0)
 
 
 if __name__ == '__main__':
 
-    import sys
     sys.exit(main())

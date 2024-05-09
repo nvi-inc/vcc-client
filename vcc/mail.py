@@ -5,7 +5,7 @@ from email.mime.text import MIMEText
 
 from vcc import settings
 
-logger = logging.getLogger()
+logger = logging.getLogger('vcc')
 
 
 def send_mail(subject, message):

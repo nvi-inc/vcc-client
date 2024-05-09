@@ -1,21 +1,24 @@
-import os
-import time
 import gzip
 import logging
 import logging.handlers
-from pathlib import Path
-import signal
-
+import os
+import sys
+import platform
+from base64 import urlsafe_b64decode as b64d
+from base64 import urlsafe_b64encode as b64e
 from datetime import date, datetime
-from base64 import urlsafe_b64encode as b64e, urlsafe_b64decode as b64d
-from psutil import Process, process_iter
+from pathlib import Path
+from subprocess import Popen
+import hashlib
 
+import toml
 from cryptography.fernet import Fernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-groups = {'CC', 'NS', 'OC', 'AC', 'CO', 'DB'}
+vcc_groups = {'CC': 'Coordinating Center', 'OC': "Operations Center", 'AC': 'Analysis Center',
+              'CO': 'Correlator', 'NS': 'Network Station', 'DB': 'Dashboard'}
 
 
 # Error with VCC problems
@@ -26,10 +29,10 @@ class VCCError(Exception):
 
 # Make sure folder is full path
 def make_path(folder, filename):
-    return os.path.join(os.path.expanduser(folder), filename)
+    return Path(Path(folder).expanduser(), filename)
 
 
-# Change a iso format string to datetime. Return string if not datetime
+# Change iso format string to datetime. Return string if not datetime
 def decode_obj(val):
     try:
         return datetime.fromisoformat(val)
@@ -39,7 +42,6 @@ def decode_obj(val):
 
 # Change dictionary to attribute of a class
 def make_object(data, cls=None, index=0):
-
     # Use empty Obj class if one is not provided
     cls = cls if cls else type('Obj', (), {})()
 
@@ -93,8 +95,8 @@ def json_decoder(obj):
 backend = default_backend()
 
 
+# Derive a secret key from a given password and salt"""
 def _derive_key(password: bytes, salt: bytes, iterations: int) -> bytes:
-    """Derive a secret key from a given password and salt"""
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=iterations, backend=backend)
     return b64e(kdf.derive(password))
 
@@ -123,8 +125,8 @@ class DebugFilter(logging.Filter):
 def set_logger(log_path='', prefix='', console=False, size=1000000):
     # Functions needed to provide name of new compress file
     def namer(name):
-        folder = os.path.dirname(name)
-        return os.path.join(folder, datetime.utcnow().strftime(f'{prefix}%Y-%m-%d.%H%M%S.gz'))
+        folder = Path(name).parent
+        return Path(folder, datetime.utcnow().strftime(f'{prefix}%Y-%m-%d.%H%M%S.gz'))
 
     # Functions needed to created file rotator with gzip compression
     def rotator(source, destination):
@@ -153,35 +155,62 @@ def set_logger(log_path='', prefix='', console=False, size=1000000):
     return logger
 
 
-def get_process(name):
-    my_pid = os.getpid()
-    for prc in process_iter(attrs=['pid', 'name', 'cmdline']):
-        if prc.info['cmdline'] and name in prc.info['cmdline'] and prc.info['pid'] != my_pid:
-            return prc
+def get_config_data(config):
+    for path in [Path(config if config else 'vcc.ctl'), Path('/usr2/control/vcc.ctl'), Path(Path.home(), 'vcc.ctl')]:
+        if path.exists():
+            try:
+                return toml.load(path.open())
+            except toml.TomlDecodeError as exc:
+                print(f'Error reading {path} [{str(exc)}]')
+                exit(0)
+    return {}
+
+
+def get_ns_code(config):
+    if data := get_config_data(config):
+        return data.get('Signatures', {}).get('NS', [None, None])[0]
     return None
 
 
-# Stop VCCN monitoring application
-def stop_process(name, verbose=True):
-    prc = get_process(name)
-    if prc:
-        try:
-            Process(prc.info['pid']).send_signal(signal.SIGTERM)
-            while True:
-                time.sleep(1)
-                prc = get_process(name)
-                if prc:
-                    Process(prc.info['pid']).send_signal(signal.SIGKILL)
-            if verbose:
-                print(f'Successfully killed \"vccns\" process {prc.info["pid"]}')
-        except Exception as err:
-            if verbose:
-                print(f'Failed trying to kill \"vccns\" process {prc.info["pid"]}. [{str(err)}]')
-            return False
-    elif verbose:
-        print(f'{name} is not running')
-    return True
+def vcc_cmd(action, options, user=None, group=None):
+    cmd = str(Path(Path(sys.argv[0]).parent, action))
+    if platform.system() == "Windows":
+        cmd = cmd.replace('\\', '\\\\')
+
+    print('cmd', cmd, len(cmd), len(options))
+    # Use popen so that thread is not blocked by window message
+    Popen([f'{cmd} {options}'], user=user, group=group, shell=True,
+          stdin=None, stdout=None, stderr=None, close_fds=True)
 
 
+# Output VCC package version
+def show_version():
+    import pkg_resources  # part of setuptools
+    print('vcc version', pkg_resources.require("vcc")[0].version)
+    sys.exit(0)
 
 
+def help(subject):
+    import pkg_resources  # part of setuptools
+    subjects = toml.load(open(pkg_resources.resource_filename(__name__, f'help/vcc.toml')))
+    title, *lines = subjects['vcc']['text']
+    message = '<br>'.join(lines)
+
+    vcc_cmd('message-box', f'-t "{title}" -m "{message}" -i "info"')
+
+
+def message_box(title, msg, icon):
+    message = '<br>'.join(msg.splitlines())
+    vcc_cmd('message-box', f'-t "{title}" -m "{message}" -i "{icon}"')
+
+
+def get_md5sum(path, chunk_size=32768):
+
+    md5 = hashlib.md5()
+    with open(path, 'rb') as file:
+        while True:
+            chunk = file.read(chunk_size)
+            if not chunk:
+                break
+            md5.update(chunk)
+    return md5.hexdigest()

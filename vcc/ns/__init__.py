@@ -1,52 +1,66 @@
-import os
+import re
+import json
 import psutil
-from subprocess import Popen
+from psutil import process_iter, AccessDenied, NoSuchProcess
 
-import logging
+from vcc import vcc_cmd
 
-logger = logging.getLogger('vcc')
+
+get_file_name = re.compile('.*filename=\"(?P<name>.*)\".*').match
 
 
 # Get all displays for oper users.
-def get_displays(all_users=False, display=None):
+def get_displays(display=None):
 
-    displays = [display if display else os.environ.get('DISPLAY', None)]
-    if all_users:
-        oper = [user.pid for user in psutil.users() if user.name == 'oper']
-        for prc in psutil.process_iter():
-            for parent in prc.parents():
-                if parent.pid in oper:
-                    try:
-                        displays.append(prc.environ().get('DISPLAY', None))
-                    finally:
-                        break
+    if display:
+        return [display]
+    displays = []
+    oper = [user.pid for user in psutil.users() if user.name == 'oper']
+    for prc in psutil.process_iter():
+        for parent in prc.parents():
+            if parent.pid in oper:
+                try:
+                    displays.append(prc.environ().get('DISPLAY', None))
+                finally:
+                    break
 
     return list(filter(None, list(set(displays))))
 
 
 # Notify oper using vcc message_box. Pop message box to all displays or the user display
-def notify(title, message, option='', all_users=False, display=None, icon='info'):
-    cmd = f"vcc-message {option} \'{title}\' \'{message}\' \'{icon}\'"
-
-    # Use popen so that thread is not blocked by window message
-    if not display and not all_users:
-        Popen([cmd], shell=True, stdin=None, stdout=None, stderr=None, close_fds=True)
-    else:
-        for display in get_displays(all_users, display):
-            logger.debug(f'display is {display}')
-            env = {**os.environ, **{'DISPLAY': display}}
-            Popen([cmd], env=env, shell=True, stdin=None, stdout=None, stderr=None, close_fds=True)
+def notify(title, message, icon='info', display=None):
+    # Use vcc_cmd to start a new thread for all 'oper' displays
+    for display in get_displays(display):
+        options = f"-t '{title}' -m '{message}' -i '{icon}' -D '{display}'"
+        vcc_cmd('message-box', options, user='oper', group='rtx')
 
 
-# Notify oper using zenity message box. Pop message box to all displays or the user display
-def notify_zenity(title, message, all_users=False, display=None):
-    cmd = f"zenity --info --text=\'{message}\' --no-wrap --title=\'{title}\'"
-
-    if not display and not all_users:
-        Popen([cmd], shell=True, stdin=None, stdout=None, stderr=None, close_fds=True)
-    else:
-        for display in get_displays(all_users, display):
-            logger.debug(f'display is {display}')
-            Popen([cmd + f' --display={display}'], shell=True, stdin=None, stdout=None, stderr=None, close_fds=True)
+# Notify oper using vcc message_box. Pop message box to all displays or the user display
+def show_sessions(title, sessions, option='', display=None):
+    # Use vcc_cmd to start a new thread for all 'oper' displays
+    message = json.dumps(sessions)
+    for display in get_displays(display):
+        options = f"{option} -t '{title}' -m '{message}' -D '{display}'"
+        vcc_cmd('sessions-wnd', options, user='oper', group='rtx')
 
 
+# Notify oper using vcc message_box. Pop message box to all displays or the user display
+def show_next(sta_id, display=None):
+    # Use vcc_cmd to start a new thread for all 'oper' displays
+    for display in get_displays(display):
+        options = f'{sta_id} -D "{display}"'
+        vcc_cmd('vcc', options, user='oper', group='rtx')
+
+
+def get_ddout_log():
+    """
+    Get log opened by Field System
+    """
+    for proc in process_iter(['name', 'pid']):
+        if proc.info['name'] == 'ddout':
+            try:
+                files = [file.path for file in proc.open_files() if file.path.startswith('/usr2/log')]
+                return files[0] if files else None
+            except (NoSuchProcess, AccessDenied):
+                return None
+    return None

@@ -3,24 +3,15 @@ import os
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 
 import shutil
 import pexpect
 
 
-from vcc import settings
+from vcc import settings, vcc_cmd
 
 logger = logging.getLogger('vcc')
-
-
-def edited(sched_file, ses_id, sta_id):
-    ses_id, sta_id = ses_id.lower(), sta_id.lower()
-    last_modified = os.stat(sched_file).st_mtime
-    for file in [os.path.join(settings.Folders.snap, f'{ses_id}{sta_id}.skd'),
-                 os.path.join(settings.Folders.proc, f'{ses_id}{sta_id}.skd')]:
-        if os.path.exists(file) and os.stat(file).st_time != last_modified:
-            return True, os.path.basename(file)
-    return False, ''
 
 
 # Manage interaction with drudg
@@ -53,7 +44,7 @@ class DRUDG:
 
         logger.info(f'processing {filename}')
 
-        schedule = os.path.join(settings.Folders.schedule, os.path.basename(filename))
+        schedule = Path(settings.Folders.schedule, os.path.basename(filename))
         logger.debug(f'DRUDG {schedule}')
         self.modified = os.stat(schedule).st_mtime
 
@@ -134,20 +125,26 @@ class DRUDG:
 
 
 def drudg_it(ses_id, vex=False):
+    def file_time(f):
+        return f'{datetime.fromtimestamp(f.lstat().st_mtime).strftime("%Y-%m-%d %H:%M")}'
 
-    sta_id = settings.Signatures.NS[0].lower()
+    if not (sta_id := settings.get_user_code('NS')):
+        vcc_cmd('message-box',
+                "-t 'NO privilege for this action' -m 'Only Network Station can run drudg on FS' -i 'warning'")
+        return
+
+    sta_id = sta_id.lower()
 
     drudg = DRUDG(ses_id, sta_id)
     filename = f'{ses_id}.{"vex" if vex else "skd"}'
-    ans = drudg.drudg(filename)
-    if ans:
-        print('drudg successful!')
-        filepath = os.path.join(settings.Folders.schedule, filename)
-        fmt = lambda f: f'{datetime.fromtimestamp(os.stat(f).st_mtime).strftime("%Y-%m-%d %H:%M")}'
-        print(f'{filepath:30s} {fmt(filepath)}')
-        for file in [os.path.join(settings.Folders.snap, f'{ses_id}{sta_id}.snp'),
-                     os.path.join(settings.Folders.proc, f'{ses_id}{sta_id}.prc'),
-                     os.path.join(settings.Folders.list, f'{ses_id}{sta_id}.lst')]:
-            print(f'{file:30s} {fmt(file) if os.path.exists(file) else "not found"}')
+    if err := drudg.drudg(filename):
+        print(f'drudg failed!: {err}')
     else:
-        print(f'drudg failed!: {ans}' if ans else 'drudg successful!')
+        print('drudg successful!')
+        filepath = Path(settings.Folders.schedule, filename)
+        print(f'{filepath:30s} {file_time(filepath)}')
+        for file in [Path(settings.Folders.snap, f'{ses_id}{sta_id}.snp'),
+                     Path(settings.Folders.proc, f'{ses_id}{sta_id}.prc'),
+                     Path(settings.Folders.list, f'{ses_id}{sta_id}.lst')]:
+            print(f'{file:30s} {file_time(file) if file.exists() else "not found"}')
+
