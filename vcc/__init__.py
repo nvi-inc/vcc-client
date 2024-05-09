@@ -177,7 +177,6 @@ def vcc_cmd(action, options, user=None, group=None):
     if platform.system() == "Windows":
         cmd = cmd.replace('\\', '\\\\')
 
-    print('cmd', cmd, len(cmd), len(options))
     # Use popen so that thread is not blocked by window message
     Popen([f'{cmd} {options}'], user=user, group=group, shell=True,
           stdin=None, stdout=None, stderr=None, close_fds=True)
