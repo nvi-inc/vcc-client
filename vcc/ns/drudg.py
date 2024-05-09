@@ -142,9 +142,9 @@ def drudg_it(ses_id, vex=False):
     else:
         print('drudg successful!')
         filepath = Path(settings.Folders.schedule, filename)
-        print(f'{filepath:30s} {file_time(filepath)}')
+        print(f'{str(filepath):30s} {file_time(filepath)}')
         for file in [Path(settings.Folders.snap, f'{ses_id}{sta_id}.snp'),
                      Path(settings.Folders.proc, f'{ses_id}{sta_id}.prc'),
                      Path(settings.Folders.list, f'{ses_id}{sta_id}.lst')]:
-            print(f'{file:30s} {file_time(file) if file.exists() else "not found"}')
+            print(f'{str(file):30s} {file_time(file) if file.exists() else "not found"}')
 
