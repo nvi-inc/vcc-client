@@ -293,15 +293,16 @@ class Dashboard(tk.Tk):
     def get_schedule(self):
         for n in range(3):
             try:
-                rsp = self.vcc.api.get(f'/schedules/{self.session.code.lower()}', params={'select': 'summary'})
-                if rsp:
-                    data = json_decoder(rsp.json())
-                    self.session.update_schedule(data)
+                if rsp := self.vcc.api.get(f'/schedules/{self.session.code.lower()}', params={'select': 'summary'}):
+                    self.session.update_schedule(json_decoder(rsp.json()))
                     self.schedule.set(self.session.sched_version)
-                    self.scans = {info['station']: {'last': 0, 'total': info['nbr_scans'], 'list': set()}
+                    self.scans = {info['station']: {'last': 0, 'total': info['nbr_scans'], 'version': info['version'],
+                                                    'list': set()}
                                   for info in self.session.schedule.scheduled}
                     for sta_id, nbr in self.scans.items():
                         self.update_station_info(sta_id, '#4', f'{nbr["last"]}/{nbr["total"]}')
+                        if nbr['version']:
+                            self.update_station_info(sta_id, '#2', f'V{nbr["version"]}')
 
                 break
             except VCCError:

@@ -123,7 +123,7 @@ def main():
         elif args.action == 'sked':  # Upload schedule file
             upload_schedule_files(args.files, notify=not args.quiet)
         elif args.action == 'master':
-            master(args.param, args.delete)
+            master(args.param, args.delete) 
         elif args.action == 'dashboard':
             Dashboard(args.session).exec()
         elif args.action == 'sumops':
