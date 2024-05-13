@@ -1,5 +1,6 @@
 from vcc import settings
-from vcc.utils import upcoming_sessions, master_types
+from vcc.utils import master_types
+from vcc.tools import upcoming_sessions
 from vcc.ns.download import download
 from vcc.ns.drudg import drudg_it
 from vcc.ns.onoff import onoff

@@ -1,6 +1,5 @@
 import os
 import re
-import json
 import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -153,51 +152,6 @@ def show_next(sta_id):
 
 master_types = dict(int='intensives ', std='24H ', all='')
 
-
-def upcoming_sessions(ses_type, code, args):
-    type_str = master_types.get(ses_type, '')
-
-    def to_date(txt, default=''):
-        try:
-            return datetime.fromisoformat(txt)
-        except (ValueError, TypeError):
-            try:
-                return datetime.strptime(txt, '%Y%m%d')
-            except (ValueError, TypeError):
-                try:
-                    return datetime.strptime(txt, '%Y-%m-%d')
-                except (ValueError, TypeError):
-                    return default
-
-    sta_id = code
-    with VCC() as vcc:
-        api = vcc.get_api()
-        now = datetime.utcnow()
-        today = datetime.combine(now.date(), datetime.min.time())
-        begin = to_date(args.start, today)
-        end = datetime.combine(to_date(args.end, begin + timedelta(days=args.days)).date(), datetime.max.time())
-        if sta_id:
-            if not api.get(f'/stations/{sta_id}'):
-                vcc_cmd('message-box', f'-t "Station {sta_id.capitalize()} does not exist" -m "" -i "warning"')
-                return
-            sta_str = f' for {sta_id.capitalize()}'
-            sessions = api.get(f'/sessions/next/{sta_id}', params={'days': args.days,
-                                                                   'begin': to_date(args.start, ''),
-                                                                   'end': to_date(args.end, '')}
-                               ).json()
-        else:
-            sta_str = ''
-            rsp = api.get('/sessions', params={'begin': begin, 'end': end, 'master': ses_type})
-            sessions = [api.get(f'/sessions/{ses_id}').json() for ses_id in rsp.json()]
-
-        sessions = [data for data in sessions if datetime.fromisoformat(data['start']) > now]
-        if master_type := {'int': 'intensive', 'std': 'standard'}.get(ses_type, ''):
-            sessions = [ses for ses in sessions if ses['master'] == master_type]
-        when = f" ({begin.date()} to {end.date()})" if sessions else ''
-        title = f'List of {type_str}sessions{sta_str}{when}'
-        message = json.dumps(sessions)
-        display_option = f' -D {args.display}' if args.display else ''
-        vcc_cmd("sessions-wnd", f"-t '{title}' -m '{message}'{display_option}")
 
 
 

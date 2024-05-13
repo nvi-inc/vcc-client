@@ -12,8 +12,8 @@ from vcc.session import Session
 from vcc.sumops import sumops
 from vcc.urgent import VCCMessage
 from vcc.users import test_users
-from vcc.utils import (fetch_files, master_types, upcoming_sessions,
-                       upload_schedule_files)
+from vcc.utils import (fetch_files, master_types, upload_schedule_files)
+from vcc.tools import upcoming_sessions
 
 
 # Output session information
