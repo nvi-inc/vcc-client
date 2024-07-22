@@ -9,6 +9,7 @@ from tkinter import messagebox
 from vcc import settings, VCCError, json_decoder, vcc_cmd
 from vcc.client import VCC
 from vcc.fslog import download_log
+from vcc.session import Session
 
 
 # Compute md5 hash for a file
@@ -49,13 +50,15 @@ is_log = re.compile(r'(?P<ses_id>[a-z0-9]*)(?P<sta_id>[a-z0-9]{2})(?P<fmt>_full\
 
 
 def fetch_files(name):
-    def save_file(response, subdir, msg):
+    def save_file(response, msg):
         if not (found := get_filename(response.headers['content-disposition'])):
             messagebox.showerror(f"Download problem", f"Problem downloading {msg}\n"
                                                       f"{response.headers['content-disposition']}")
             return None
         dir_path = getattr(folders, subdir, '.') if (folders := getattr(settings, 'Folders')) else '.'
-        with open(p := Path(dir_path, found['name']), 'wb') as f:
+        dir_path = dir_path.replace('{year}', session.year).replace('{session}', ses_id)
+        (p := Path(dir_path, found['name'])).parent.mkdir(parents=True, exist_ok=True)
+        with open(p, 'wb') as f:
             f.write(rsp.content)
         return p
 
@@ -64,38 +67,44 @@ def fetch_files(name):
     with VCC() as vcc:
         # Request schedule files (skd, vex and text)
         if not (suffix := path.suffix[1:]):
-            ses_id, folder = name.lower(), 'schedule'
-            if not vcc.api.get(f'/sessions/{ses_id}'):
+            ses_id, subdir = name.lower(), 'schedule'
+            if not (rsp := vcc.api.get(f'/sessions/{ses_id}')):
                 messagebox.showerror(ses_id.upper(), f'{ses_id} is not an IVS session')
                 return
+            session = Session(rsp.json())
             if not (rsp := vcc.api.get(f'/schedules/{ses_id}')):
                 messagebox.showerror('Get schedule', f'No schedule for files for {ses_id}')
                 return
-            if not (file := save_file(rsp, f'schedule for {ses_id}', folder)):
+            if not (file := save_file(rsp, f'schedule for {ses_id}')):
                 return
             print(f'{file.name} downloaded')
-            # If sk was downloaded, look for vex file
+            # If skd was downloaded, look for vex file
             if file.suffix == '.skd' and (rsp := vcc.api.get(f'/schedules/{ses_id}', params={'select': 'vex'})):
-                if file := save_file(rsp, folder, f'{ses_id}.vex'):
+                if file := save_file(rsp, f'{ses_id}.vex'):
                     print(f'{file.name} downloaded')
             # Download text file
             if rsp := vcc.api.get(f'/schedules/{ses_id}', params={'select': 'txt'}):
-                if file := save_file(rsp, folder, f'{ses_id}.txt'):
+                if file := save_file(rsp, f'{ses_id}.txt'):
                     print(f'{file.name} downloaded')
-            # Download prc file is user is stations
+            # Download prc file if user is stations
+            subdir = 'proc'
             if sta_id := getattr(settings.Signatures, 'NS', [''])[0].lower():
                 if rsp := vcc.api.get(f'/schedules/{ses_id}', params={'select': f'{sta_id}|prc'}):
-                    if file := save_file(rsp, 'proc', f'{ses_id}{sta_id}.prc'):
+                    if file := save_file(rsp, f'{ses_id}{sta_id}.prc'):
                         print(f'{file.name} downloaded')
 
         elif suffix in ('skd', 'vex', 'txt', 'prc'):
             stem = Path(name.lower()).stem
-            folder = 'proc' if suffix == 'prc' else 'schedule'
+            subdir = 'proc' if suffix == 'prc' else 'schedule'
             ses_id, select = (stem[:-2], f"{stem[-2:]}|{suffix}") if suffix == 'prc' else (stem, suffix)
+            if not (rsp := vcc.api.get(f'/sessions/{ses_id}')):
+                messagebox.showerror(ses_id.upper(), f'{ses_id} is not an IVS session')
+                return
+            session = Session(rsp.json())
             # Download session file
             if not (rsp := vcc.api.get(f'/schedules/{ses_id}', params={'select': select})):
                 messagebox.showerror(f'Get file {name}', f"{name} failed!\n{rsp.json().get('error', rsp.text)}")
-            elif file := save_file(rsp, folder, name):
+            elif file := save_file(rsp, name):
                 print(f'{file.name} downloaded')
         elif suffix in ('log', 'bz2') and download_log(vcc, name):
             pass
@@ -153,6 +162,39 @@ def show_next(sta_id):
 master_types = dict(int='intensives ', std='24H ', all='')
 
 
+def to_date(txt, default=''):
+    try:
+        return datetime.fromisoformat(txt)
+    except (ValueError, TypeError):
+        try:
+            return datetime.strptime(txt, '%Y%m%d')
+        except (ValueError, TypeError):
+            try:
+                return datetime.strptime(txt, '%Y-%m-%d')
+            except (ValueError, TypeError):
+                return default
+
+
+def get_next_sessions(vcc, sta_id=None, start=None, end=None, days=14):
+    now = datetime.utcnow()
+    today = datetime.combine(now.date(), datetime.min.time())
+    begin = to_date(start, today)
+    end = datetime.combine(to_date(end, begin + timedelta(days=days)).date(), datetime.max.time())
+    if sta_id:
+        if vcc.api.get(f'/stations/{sta_id}'):
+            sessions = json_decoder(vcc.api.get(f'/sessions/next/{sta_id}',
+                                                params={'days': days,
+                                                        'begin': to_date(start, ''),
+                                                        'end': to_date(end, '')}
+                                                ).json())
+        else:
+            vcc_cmd('message-box', f'-t "Station {sta_id.capitalize()} does not exist" -m "" -i "warning"')
+            sessions = None
+    else:
+        rsp = vcc.api.get('/sessions', params={'begin': begin, 'end': end})
+        sessions = json_decoder(rsp.json())
+
+    return sessions, begin, end
 
 
 

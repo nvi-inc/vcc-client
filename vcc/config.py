@@ -23,7 +23,7 @@ class ConfigDecoder:
         self.bin = Path(self.wd, 'bin')
         self.bin.mkdir(exist_ok=True)
 
-    def chown(self, path, mode):
+    def chown(self, path: Path, mode: int) -> None:
         if platform.system() != "Windows":
             os.chown(path, self.uid, self.gid)
         path.chmod(mode)

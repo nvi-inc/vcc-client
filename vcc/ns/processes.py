@@ -1,4 +1,3 @@
-import json
 import shutil
 from threading import Thread
 import traceback
@@ -8,8 +7,9 @@ import os
 from pathlib import Path
 
 from vcc import settings, make_path, vcc_cmd
+from vcc.utils import get_next_sessions
 from vcc.ns.drudg import DRUDG
-from vcc.ns import notify, show_sessions, show_next
+from vcc.ns import notify, show_sessions
 
 logger = logging.getLogger('vcc')
 
@@ -25,14 +25,14 @@ class ProcessMaster(Thread):
     def run(self):
         logger.debug('star processing master')
 
-        sessions = []
+        show_sessions(f'List of modified sessions for {self.sta_id}', list(self.data.items()))
         # Get session information
-        for ses_id, status in self.data.items():
-            if rsp := self.vcc.api.get(f'/sessions/{ses_id}'):
-                sessions.append(dict(**rsp.json(), **{'status': status}))
+        session_list, begin, end = get_next_sessions(self.vcc, self.sta_id)
+        sessions = [(ses_id, self.data.get(ses_id, '')) for ses_id in session_list] if session_list else []
         # Display information
-        show_sessions(f'List of modified sessions for {self.sta_id}', sessions)
-        show_next(self.sta_id)
+        when = f" ({begin.date()} to {end.date()})" if sessions else ''
+        title = f'List of sessions for {self.sta_id.capitalize()}{when}'
+        show_sessions(title, sessions, option='-M ')
 
 
 class ProcessSchedule(Thread):
@@ -58,17 +58,12 @@ class ProcessSchedule(Thread):
         if not os.path.exists(sched):
             return []
         sched_time = os.stat(sched).st_mtime
-        logger.debug(f'sched {sched_time}')
         name = f'{ses_id}{self.sta_id.lower()}'
         files = [make_path(settings.Folders.snap, f'{name}.snp'), make_path(settings.Folders.proc, f'{name}.prc')]
-        for file in files:
-            if os.path.exists(file):
-                logger.debug(f'{file} {os.stat(file).st_mtime}')
         return [os.path.basename(file) for file in files
                 if os.path.exists(file) and os.stat(file).st_mtime > sched_time]
 
     def run(self):
-        logger.debug(f'star processing schedule {self.ses_id}')
         # Download schedule (skd first)
         download_option = settings.Messages.Schedule.download.split()[0]
         if download_option == 'no':

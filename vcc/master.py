@@ -30,9 +30,8 @@ def update_network(lines):
     # Get existing information from VOC
     try:
         with VCC('CC') as vcc:
-            if not (rsp := vcc.api.get('/stations')):
-                raise VCCError(rsp.text)
-            old = {data['code']: data for data in rsp.json() if data.pop('updated')}
+            old = {data['code']: data for data in rsp.json() if data.pop('updated')} \
+                if (rsp := vcc.api.get('/stations')) else {}
             if network == old:
                 raise VCCError('No changes in network stations')
             if added := {code: value for (code, value) in network.items() if old.get(code) != value}:
@@ -91,10 +90,10 @@ def encode_duration(seconds):
 
 
 # Update sessions using local master file
-def update_master(lines):
+def update_master(lines, filter_old=True):
 
     header = re.compile(r'\s*(?P<year>\d{4})\sMULTI-AGENCY (?P<master>INTENSIVES)? ?SCHEDULE')
-    now = datetime.utcnow()
+    now = datetime.utcnow() if filter_old else datetime(1900, 1, 1)
 
     # Read master file
     sessions = {}
@@ -114,7 +113,7 @@ def update_master(lines):
     # Post data to VCC
     try:
         with VCC('CC') as vcc:
-            if rsp := vcc.api.post('/sessions', data=sessions):
+            if rsp := vcc.api.post('/sessions', data=sessions, params={'notify': filter_old}):
                 for ses_id, status in rsp.json().items():
                     print(ses_id, status)
             elif ans := rsp.json():
@@ -399,7 +398,7 @@ def view_session(ses_id):
     viewer = SessionViewer(ses_id)
 
 
-def master(param, delete=False):
+def master(param, delete=False, filter_old=True):
     from vcc import settings
 
     # Check that user has right privileges
@@ -417,7 +416,7 @@ def master(param, delete=False):
         with open(path) as f:
             data = f.read()
         if 'MULTI-AGENCY' in data:
-            update_master(data.splitlines())
+            update_master(data.splitlines(), filter_old=filter_old)
         elif 'IVS Master File Format Definition' in data:
             update_codes(data.splitlines())
         elif 'ns-codes.txt' in data:

@@ -27,6 +27,8 @@ setup(
             'urgent=vcc.__main__:main',
             'inbox=vcc.__main__:main',
             'vcc-config=vcc.config:main',
+            'test-in=vcc.inbox2:main',
+            'test-msg=vcc.messages:main',
             'vccmon=vcc.ns.service:main'
         ]
     },

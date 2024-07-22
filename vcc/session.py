@@ -52,6 +52,10 @@ class Session:
         self.schedule = make_object(data) if data else None
 
     @property
+    def year(self):
+        return self.start.strftime('%Y')
+
+    @property
     def network(self):
         return list(map(str.capitalize, self.schedule.observing if self.schedule else self.included))
 

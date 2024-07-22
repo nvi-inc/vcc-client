@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 from tkinter import *
 from tkinter import ttk
 
-from vcc import json_decoder, vcc_cmd
+from vcc import settings, json_decoder, vcc_cmd
 from vcc.client import VCC
-from vcc.utils import master_types
+from vcc.utils import master_types, get_next_sessions
 
 
 class Sessions:
@@ -18,6 +18,7 @@ class Sessions:
               'SUBM': (50, CENTER, NO)}
 
     def __init__(self, title, sessions, master=False, display=None):
+        print('Session ', display)
         if master:
             self.header['STATUS'] = (100, W, NO)
         width = sum([info[0] for info in self.header.values()])
@@ -48,6 +49,7 @@ class Sessions:
 
         for row, ses in enumerate(sessions, 1):
             # Insert the data in Treeview widget
+            print('ses', ses)
             h, sec = divmod(ses['duration'], 3600)
             cancelled = len(ses['included']) < 2
             stations = f"{''.join(ses['included'])} -{''.join(ses['removed'])}" \
@@ -78,48 +80,22 @@ class Sessions:
 
 
 def upcoming_sessions(ses_type, code, args):
-    type_str = master_types.get(ses_type, '')
-
-    def to_date(txt, default=''):
-        try:
-            return datetime.fromisoformat(txt)
-        except (ValueError, TypeError):
-            try:
-                return datetime.strptime(txt, '%Y%m%d')
-            except (ValueError, TypeError):
-                try:
-                    return datetime.strptime(txt, '%Y-%m-%d')
-                except (ValueError, TypeError):
-                    return default
+    print('ses_type', ses_type)
+    master = {'int': 'intensive', 'std': 'standard'}.get(ses_type, ('intensive','standard'))
 
     sta_id = code
     with VCC() as vcc:
-        api = vcc.get_api()
+        session_list, begin, end = get_next_sessions(vcc, sta_id, args.start, args.end, args.days)
+        if not session_list:
+            return
         now = datetime.utcnow()
-        today = datetime.combine(now.date(), datetime.min.time())
-        begin = to_date(args.start, today)
-        end = datetime.combine(to_date(args.end, begin + timedelta(days=args.days)).date(), datetime.max.time())
-        if sta_id:
-            if not api.get(f'/stations/{sta_id}'):
-                vcc_cmd('message-box', f'-t "Station {sta_id.capitalize()} does not exist" -m "" -i "warning"')
-                return
-            sta_str = f' for {sta_id.capitalize()}'
-            sessions = api.get(f'/sessions/next/{sta_id}', params={'days': args.days,
-                                                                   'begin': to_date(args.start, ''),
-                                                                   'end': to_date(args.end, '')}
-                               ).json()
-        else:
-            sta_str = ''
-            rsp = api.get('/sessions', params={'begin': begin, 'end': end, 'master': ses_type})
-            sessions = [api.get(f'/sessions/{ses_id}').json() for ses_id in rsp.json()]
+        sessions = [json_decoder(rsp.json()) for code in session_list if (rsp := vcc.api.get(f'/sessions/{code}'))]
+        data = [ses for ses in sessions if ses['start'] > now and ses['master'] in master]
 
-        sessions = [data for data in sessions if datetime.fromisoformat(data['start']) > now]
-        if master_type := {'int': 'intensive', 'std': 'standard'}.get(ses_type, ''):
-            sessions = [ses for ses in sessions if ses['master'] == master_type]
+        type_str = master_types.get(ses_type, '')
+        sta_str = f' for {sta_id.capitalize()}' if sta_id else ''
         when = f" ({begin.date()} to {end.date()})" if sessions else ''
         title = f'List of {type_str}sessions{sta_str}{when}'
-        message = json.dumps(sessions)
-        data = json_decoder(json.loads(message))
         display_option = f'{args.display}' if args.display else ''
         Sessions(title, data, display_option)
 
@@ -128,16 +104,38 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description='Display message')
+    parser.add_argument('-c', '--config', help='config file', required=True)
     parser.add_argument('-M', '--master', help='show sessions', action='store_true', required=False)
     parser.add_argument('-t', '--title', help='title', required=True)
     parser.add_argument('-m', '--message', help='message', required=True)
     parser.add_argument('-D', '--display', help='display', required=False)
 
-    args = parser.parse_args()
-    data = json_decoder(json.loads(args.message))
+    args = settings.init(parser.parse_args())
+    data = []
+    with VCC() as vcc, open('/tmp/vcc-wnd.txt', 'w') as f:
+        for (code, status) in json_decoder(json.loads(args.message)):
+            if rsp := vcc.api.get(f'/sessions/{code}'):
+                data.append(dict(**json_decoder(rsp.json()), **{'status': status}))
+
     Sessions(args.title, data, args.master, args.display)
 
 
 if __name__ == '__main__':
 
     sys.exit(main())
+
+
+"""
+    with VCC() as vcc, open('/tmp/vcc-wnd.txt', 'w') as f:
+        data = []
+        for (ses_id, status) in json_decoder(json.loads(args.message)):
+       for ses_id, status in self.data.items():
+            if rsp := self.vcc.api.get(f'/sessions/{ses_id}'):
+                sessions.append(dict(**rsp.json(), **{'status': status}))
+                # sessions.append((ses_id, status))
+            if status:
+                session['status'] = status
+            data.append(session)
+            print(ses_id, session, file=f)
+
+"""

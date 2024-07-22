@@ -3,9 +3,13 @@ import json
 import logging
 import logging.handlers
 import uuid
+import jwt
+from time import time
 from base64 import b64decode
-from datetime import date, datetime
 from urllib.parse import quote, urljoin
+from cryptography.hazmat.primitives import serialization
+
+from datetime import datetime
 
 import pika
 import requests
@@ -14,8 +18,7 @@ from Crypto.Cipher import AES
 from sshtunnel import (BaseSSHTunnelForwarderError,
                        HandlerSSHTunnelForwarderError, SSHTunnelForwarder)
 
-from vcc import (VCCError, json_encoder, make_object, settings, signature,
-                 vcc_groups)
+from vcc import (VCCError, json_encoder, make_object, settings, vcc_groups)
 
 logger = logging.getLogger('vcc')
 
@@ -30,9 +33,11 @@ class API:
     def __init__(self, group_id, config):
         self.base_url = f'{config["protocol"]}://{config["url"]}:{config["api_port"]}'
         self.session = requests.Session()
-        self.session.headers.update(signature.make(group_id))
+        self.group_id = group_id
+        self.code, self.uid = getattr(settings.Signatures, group_id)
+        self.secret_key = str(uuid.uuid4())
+        self.private_key = self.load_private_key()
         self.jwt_data = None
-
 
     def close(self):
         try:
@@ -41,13 +46,34 @@ class API:
         finally:
             self.session = None
 
+    @staticmethod
+    def load_private_key():
+        with open(settings.RSAkey.path, 'rb') as f:
+            return serialization.load_ssh_private_key(f.read(), password=None)
+
+    def make_signature(self, exp=120, data=None):
+        required = {'code': self.code, 'group': self.group_id, 'secret': self.secret_key, 'exp': time() + exp}
+        data = dict(**data, **required) if data else required
+        return {'token': jwt.encode(data, self.private_key, algorithm='RS256', headers={'uid': self.uid}),
+                'utc': datetime.utcnow().isoformat()}
+
+    def validate_signature(self, rsp):
+        if not (token := rsp.headers.get('token')):
+            return None
+        if not (headers := jwt.get_unverified_header(token)) or headers.get('uid') != self.uid:
+            raise VCCError('Invalid token')
+        try:
+            return jwt.decode(token, self.secret_key, algorithms=headers['alg'])
+        except (jwt.exceptions.ExpiredSignatureError, jwt.exceptions.InvalidSignatureError) as exc:
+            raise VCCError(f'invalid token {str(exc)}')
+
     # GET data from web service
     def get(self, path, params=None, headers=None, timeout=None):
         try:
-            extra = {'utc': datetime.utcnow().isoformat()}
-            headers = dict(**headers, **extra) if headers else extra
+            token = self.make_signature()
+            headers = dict(**headers, **token) if headers else token
             rsp = self.session.get(url=urljoin(self.base_url, path), params=params, headers=headers, timeout=timeout)
-            self.jwt_data = signature.validate(rsp) if rsp and path != '/' else None
+            self.jwt_data = self.validate_signature(rsp) if rsp and path != '/' else None
             return rsp
         except requests.exceptions.ConnectionError as exc:
             logging.debug(str(exc))
@@ -56,11 +82,11 @@ class API:
     # POST data to web service
     def post(self, path, data=None, files=None, headers=None, params=None):
         try:
-            extra = {'utc': datetime.utcnow().isoformat()}
-            headers = dict(**headers, **extra) if headers else extra
+            token = self.make_signature()
+            headers = dict(**headers, **token) if headers else token
             rsp = self.session.post(url=urljoin(self.base_url, path), json=json_encoder(data), files=files,
                                     params=params, headers=headers)
-            self.jwt_data = signature.validate(rsp) if rsp else None
+            self.jwt_data = self.validate_signature(rsp) if rsp else None
             return rsp
         except requests.exceptions.ConnectionError:
             raise VCCError('connect error')
@@ -68,11 +94,11 @@ class API:
     # PUT data to web service
     def put(self, path, data=None, files=None, headers=None):
         try:
-            extra = {'utc': datetime.utcnow().isoformat()}
-            headers = dict(**headers, **extra) if headers else extra
+            token = self.make_signature()
+            headers = dict(**headers, **token) if headers else token
             rsp = self.session.put(url=urljoin(self.base_url, path), json=json_encoder(data), files=files,
                                    headers=headers)
-            self.jwt_data = signature.validate(rsp) if rsp else None
+            self.jwt_data = self.validate_signature(rsp) if rsp else None
             return rsp
         except requests.exceptions.ConnectionError:
             raise VCCError('connect error')
@@ -80,10 +106,10 @@ class API:
     # DELETE data from web service
     def delete(self, path, headers=None):
         try:
-            extra = {'utc': datetime.utcnow().isoformat()}
-            headers = dict(**headers, **extra) if headers else extra
+            token = self.make_signature()
+            headers = dict(**headers, **token) if headers else token
             rsp = self.session.delete(url=urljoin(self.base_url, path), headers=headers)
-            self.jwt_data = signature.validate(rsp) if rsp else None
+            self.jwt_data = self.validate_signature(rsp) if rsp else None
 
             return rsp
         except requests.exceptions.ConnectionError:
@@ -219,7 +245,6 @@ class VCC:
                 try:
                     client = RMQclient(is_multi_thread=is_multi_thread)
                     client.connect(make_object(dict(**self.config, **self.api.jwt_data)))
-                    logger.debug(f'get_rmq_connection {client.connection.is_closed if client.connection else "NULL"}')
                     return client
                 except RMQclientException as exc:
                     raise VCCError(f'Problem at VCC messenger {str(exc)}')
@@ -488,7 +513,9 @@ class RMQclient:
             raise RMQclientException(f'get inbox messages failed{str(err)}')
 
 
-def get_server():
+# This method was used with encrypted string for server
+# Not deleted so I can use back if needed
+def get_server_old():
     for name, encrypted in settings.Servers.__dict__.items():
         parts = [b64decode(bytes.fromhex(x)) for x in encrypted.split('-')]
         cipher = AES.new(parts[0], AES.MODE_EAX, parts[2])
@@ -496,4 +523,17 @@ def get_server():
         config['key'] = settings.RSAkey.path
         if hasattr(settings, 'URL'):
             config['url'] = getattr(settings.URL, name, getattr(settings.URL, name.lower(), config['url']))
+        yield name.lower(), make_object(config)
+
+
+def get_server():
+    def _decode(item):
+        key, val = item.split(':')
+        try:
+            return key, int(val)
+        except ValueError:
+            return key, val
+
+    for name, info in settings.Servers.__dict__.items():
+        config = dict([_decode(item) for item in info.split(',')]+[('key', settings.RSAkey.path)])
         yield name.lower(), make_object(config)

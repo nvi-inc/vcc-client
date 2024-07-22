@@ -88,7 +88,7 @@ class NSwatcher(Thread):
             logger.warning(f'problem stopping {name} - {str(exc)}')
 
     def run(self):
-        logger.info(f'vcc-ns started {self.native_id}')
+        logger.info(f'vccmon started {self.native_id}')
 
         vcc, problem, show_msg = VCC('NS'), Event(), Event()
         problem.set()
@@ -133,7 +133,7 @@ class NSwatcher(Thread):
         vcc.close()
         for name in reversed(self.threads.keys()):
             self.threads[name].join()
-        logger.info('vcc-ns stopped')
+        logger.info('vccmon stopped')
         sys.exit(0)
 
     def terminate(self, sig, alarm):
@@ -154,7 +154,7 @@ def main():
 
     import argparse
 
-    parser = argparse.ArgumentParser(description='Network Station', prog='vcc-ns', add_help=False)
+    parser = argparse.ArgumentParser(description='Network Station', prog='vccmon', add_help=False)
     parser.add_argument('-c', '--config', help='config file', required=False)
     parser.add_argument('-D', '--debug', help='debug mode is on', action='store_true')
 

@@ -32,6 +32,8 @@ class Inbox(threading.Thread):
 
     def process_message(self, headers, data):
         self.rmq_client.acknowledge_msg()  # Always acknowledge message
+        print('headers', headers)
+        print('data', data)
         self.messages.put((headers, data))  # Send message to dashboard
 
 
@@ -337,7 +339,10 @@ class Dashboard(tk.Tk):
         self.after(int(waiting_time*1000), self.update_clock)
 
     def update_station_info(self, sta_id, col, text):
-        self.stations.set(sta_id, col, text)
+        try:
+            self.stations.set(sta_id, col, text)
+        except TclError:
+            pass
 
     def process_sta_info(self, headers, data):
         sta_id = data.get('station', None)
@@ -405,11 +410,14 @@ class Dashboard(tk.Tk):
         while not self.messages.empty():
             nbr += 1
             headers, command = self.messages.get()
+            print('process headers', headers)
+            print('process command', command)
             # Decode command
             if headers['format'] == 'json':
                 command = json.loads(command)
             code = headers['code']
             name = f'process_{code}'
+            print('process', name)
             # Call function for this specific code
             if hasattr(self, name):
                 getattr(self, name)(headers, command)

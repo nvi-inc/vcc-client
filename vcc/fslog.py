@@ -7,6 +7,7 @@ from datetime import datetime
 from vcc import settings, message_box
 from vcc.client import VCC, VCCError
 from vcc.progress import ProgressDots
+from vcc.session import Session
 
 
 class BZ2log:
@@ -54,7 +55,7 @@ def upload(vcc, sta_id, ses_id, full=True, reduce=True, quiet=False):
 
     if (path := Path(settings.Folders.log, f'{ses_id}{sta_id}.log'.lower())).exists():
         file = BZ2log(path) if full else SHORTlog(path, reduce)
-        progress = ProgressDots(f'Uploading {file.name} .', delay=5)
+        progress = ProgressDots(f'Uploading {file.name} ', delay=5)
         try:
             if not vcc.api.get(f'/sessions/{ses_id}'):
                 if not quiet:
@@ -96,18 +97,22 @@ def download_log(vcc, filename):
         return False
 
     ses_id, sta_id, fmt = found['ses_id'], found['sta_id'], found['fmt']
-    waiting = ProgressDots(f'Downloading {filename}.', delay=0.5)
+    waiting = ProgressDots(f'Downloading {filename} ', delay=0.5)
     waiting.start()
     success = 'failed!'
-    if not (rsp := vcc.api.get(f'/log/{ses_id}/{sta_id}')):
+    if not (rsp := vcc.api.get(f'/sessions/{ses_id}')) or not (session := Session(rsp.json())):
+        message_box(f'Get file {filename}', f"Session {ses_id} does not exist!", 'warning')
+    elif not (rsp := vcc.api.get(f'/log/{ses_id}/{sta_id}')):
         message_box(f'Get file {filename}', f"{filename} failed!\n{rsp.json().get('error', rsp.text)}", 'warning')
     elif not (found := re.match(r'.*filename=\"(?P<name>.*)\".*', rsp.headers['content-disposition'])):
         message_box(f"Download problem", f"Problem downloading {filename}\n{rsp.headers['content-disposition']}",
                     'warning')
     else:
         dir_path = getattr(folders, 'log', '.') if (folders := getattr(settings, 'Folders')) else '.'
+        dir_path = dir_path.replace('{year}', session.year).replace('{session}', ses_id)
+        (p := Path(dir_path, filename)).parent.mkdir(parents=True, exist_ok=True)
         decompress = fmt == '.log' and rsp.headers['content-type'] == 'application/stream'
-        with open(Path(dir_path, filename), 'wb') as f:
+        with open(p, 'wb') as f:
             f.write(bz2.decompress(rsp.content) if decompress else rsp.content)
         success = 'done!'
     waiting.stop(msg=success)

@@ -156,13 +156,12 @@ def set_logger(log_path='', prefix='', console=False, size=1000000):
 
 
 def get_config_data(config):
-    for path in [Path(config if config else 'vcc.ctl'), Path('/usr2/control/vcc.ctl'), Path(Path.home(), 'vcc.ctl')]:
-        if path.exists():
-            try:
-                return toml.load(path.open())
-            except toml.TomlDecodeError as exc:
-                print(f'Error reading {path} [{str(exc)}]')
-                exit(0)
+    if (path := Path(config)).exists():
+        try:
+            return toml.load(path.open())
+        except toml.TomlDecodeError as exc:
+            print(f'Error reading {path} [{str(exc)}]')
+            exit(0)
     return {}
 
 

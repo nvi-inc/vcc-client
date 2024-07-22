@@ -5,28 +5,28 @@ from threading import Thread, Event
 import queue
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 
 from vcc import settings, VCCError, vcc_cmd, vcc_groups
 from vcc.client import VCC, RMQclientException
 from vcc.session import Session
+from vcc.utils import messagebox
 from vcc.windows import MessageBox
+from vcc.xwidget import FakeEntry
 
 
 # Dashboard displaying session activities.
 class Listener(Thread):
 
-    def __init__(self, group_id, messages):
+    def __init__(self, groud_id, messages):
         super().__init__()
 
         self.stopped = Event()
-        self.group_id, self.rmq_client, self.messages = group_id, None, messages
+        self.vcc, self.rmq_client, self.messages = vcc, None, messages
 
     def connect(self):
         try:
-            vcc = VCC(self.group_id)
-            vcc.connect()
-            self.rmq_client = vcc.get_rmq_client()
+            self.rmq_client = self.vcc.get_rmq_client()
         except VCCError:
             self.rmq_client = None
 
@@ -53,70 +53,73 @@ class Listener(Thread):
         self.rmq_client.acknowledge_msg()  # Always acknowledge message
 
 
-class Watcher(Thread):
+class Monitoring(ttk.LabelFrame):
+    def __init__(self, parent, groups, on_selected):
 
-    def __init__(self, group_id, messages, period=5):
-        super().__init__()
+        super().__init__(parent, text=f'Monitoring', padding=(0, 0, 0, 0))
 
-        self.stopped = Event()
-        self.group_id, self.messages, self.period = group_id, messages, period
+        self.status = {}
 
-    def run(self):
-        try:
-            while not self.stopped.wait(self.period):
-                print('check inbox', datetime.now())
-                try:
-                    with VCC(self.group_id) as vcc:
-                        if rsp := vcc.api.get(f'/messages'):
-                            for headers, data in rsp.json():
-                                self.messages.put((headers, data))
-                        else:
-                            print('ERROR', rsp.text)
-                except Exception as exc:
-                    print('EXC', str(exc))
+        for row, grp in enumerate(groups):
+            ttk.Checkbutton(text=f"{settings.get_user_code(grp)} {vcc_groups[grp]}").grid(row=row, column=0)
+            ttk.Label(text='Status').grid(row=row, column=1)
+            self.status[grp] = status = FakeEntry(self, width=25, anchor='e')
+            status.grid(row=row, column=2)
 
-        except Exception as exc:
-            print('EXC', str(exc))
+        self.pack(expand=tk.NO, fill=tk.BOTH)
+        self.update()
 
-    def stop(self):
-        self.stopped.set()
+    def set_status(self, grp, text):
+        self.status[grp].set(text)
 
 
 class Inbox(tk.Tk):
 
-    def __init__(self, group_id, interval, once):
+    def __init__(self):
         super().__init__()
-        self.withdraw()
-        self.group_id, self.once = group_id, once
-        if not settings.check_privilege(group_id):
-            messagebox.showerror(self, f'No signature for {group_id}.')
+        self.groups = [grp for grp in vcc_groups.keys() if grp != 'DB' and settings.check_privilege(grp)]
+        if not self.groups:
+            messagebox('INBOX error', f'No valid groups in Signatures', icon='warning')
             sys.exit(0)
-        self.code = getattr(settings.Signatures, group_id)[0]
-        self.messages = self.listener = None
-        if not once:
-            self.messages = queue.Queue()
-            self.listener = Watcher(group_id, self.messages, interval) if interval \
-                else Listener(group_id, self.messages)
+        # Define some styles for ttk widgets
+        self.style = ttk.Style(self)
+        self.style.theme_use('default')
+        self.style.configure('LLabel.TLabel', anchor='west', padding=(5, 5, 5, 5))
+        self.style.configure('TButton', anchor='center', padding=(5, 5, 5, 5))
+        self.style.configure('Options.TMenubutton', anchor='west', padding=(5, 0, 5, 0))
+        self.style.configure('Scans.TCombobox', anchor='west', padding=(5, 0, 5, 0))
 
-    def init_wnd(self):
-        self.protocol("WM_DELETE_WINDOW", self.done)
+        # Draw main frame with all sections
+        main_frame = ttk.Frame(self, padding=(5, 5, 5, 5))
+        self.selections = Monitoring(main_frame, self.groups, self.on_click)
+        self.done, self.hide = self.done_area(main_frame)
         # Set the size of the tkinter window
-        self.title(f'Inbox {self.code} {vcc_groups.get(self.group_id, "")}')
+        self.title(f'VCC Inbox Monitoring')
 
-        style = ttk.Style(self)
-        style.theme_use('clam')
-        style.map('W.Treeview', background=[('selected', 'white')], foreground=[('selected', 'black')])
-        # Add a frame for TreeView
-        button = ttk.Button(self, text="Done", command=self.done)
-        button.pack(side=tk.BOTTOM)
-        self.configure(padx=10, pady=10)
-        self.geometry("300x75")
+        main_frame.pack(expand=tk.YES, fill=tk.BOTH)
+        main_frame.update()
+        self.minsize(main_frame.winfo_reqwidth(), main_frame.winfo_reqheight())
+
         self.deiconify()  # Ok to show it
+
+    def on_click(self, *args):
+        print(args)
+
+    def done_area(self, main_frame):
+        frame = ttk.Frame(main_frame, padding=(0, 5, 0, 5))
+        done = ttk.Button(frame, text="Done", command=self.destroy, style="TButton")
+        done.pack(side='left')
+        save = ttk.Button(frame, text="No problems to report", command=self.on_click, style="TButton")
+        save.pack(side='right')
+        frame.pack(fill=tk.BOTH)
+        frame.update()
+        return done, save
 
     def done(self):
         try:
             self.listener.stop()
             self.listener.join()
+            self.vcc.close()
             self.destroy()
         except Exception as exc:
             sys.exit(0)
@@ -151,8 +154,7 @@ class Inbox(tk.Tk):
         start = datetime.fromisoformat(data['start']).strftime('%Y-%m-%d')
         end = datetime.fromisoformat(data['end']).strftime('%Y-%m-%d') if data['end'] else 'unknown'
         sta_id = data['station'].capitalize()
-        with VCC(self.group_id) as vcc:
-            rsp = vcc.api.get(f'/sessions/next/{sta_id}', params={'begin': start, 'end': end})
+        rsp = self.vcc.api.get(f'/sessions/next/{sta_id}', params={'begin': start, 'end': end})
         sessions = [dict(**data, **{'status': f"{sta_id} {'down' if sta_id in data['removed'] else 'available'}"})
                     for data in rsp.json()]
         title = f"{sta_id} downtime modified. List of affected sessions " \
@@ -170,31 +172,10 @@ class Inbox(tk.Tk):
         msg = f"{msg}\n\nsent: {datetime.fromisoformat(headers.get('utc')):%Y-%m-%d %H:%M:%S}"
         MessageBox(self, f"Information from {data['station']}", msg, icon='urgent')
 
-    def read_once(self):
-        with VCC(self.group_id) as vcc:
-            if rsp := vcc.api.get(f'/messages'):
-                if messages := rsp.json():
-                    for headers, data in messages:
-                        name = f"process_{headers['code']}"
-                        # Call function for this specific code
-                        if hasattr(self, name):
-                            getattr(self, name)(headers, json.loads(data))
-                else:
-                    MessageBox(self, f"INBOX", 'No messages in your inbox')
-            else:
-                MessageBox(self, "INBOX error", rsp.text, icon='urgent')
-        # Wait that all child windows are closed
-        while lst := [x for x in self.winfo_children() if isinstance(x, tk.Toplevel)]:
-            self.wait_window(lst[0])
-        self.destroy()
-
     def exec(self):
-        if self.once:
-            self.after(100, self.read_once())
-        else:
-            self.init_wnd()
-            self.listener.start()
-            self.after(100, self.process_messages)
+        self.init_wnd()
+        self.listener.start()
+        self.after(100, self.process_messages)
         self.mainloop()
 
 
@@ -237,6 +218,18 @@ def read_messages(group_id):
     print('end of messages')
 
 
-def check_inbox(group_id, interval, read_once):
+def check_inbox(read=False):
+    groups = {grp: name for grp, name in vcc_groups.items() if grp != 'DB' and settings.check_privilege(grp)}
+    print(groups)
+    for grp, name in groups.items():
+        print(grp, settings.get_user_code(grp), vcc_groups[grp])
 
-    Inbox(group_id, interval, read_once).exec()
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Access VCC functionalities', exit_on_error=False)
+    parser.add_argument('-c', '--config', help='config file', required=False)
+
+    settings.init(parser.parse_args())
+
+    Inbox()

@@ -1,11 +1,14 @@
 import re
 import json
 import psutil
+import logging
+
 from psutil import process_iter, AccessDenied, NoSuchProcess
 
-from vcc import vcc_cmd
+from vcc import settings, vcc_cmd
 
 
+logger = logging.getLogger('vcc')
 get_file_name = re.compile('.*filename=\"(?P<name>.*)\".*').match
 
 
@@ -40,16 +43,8 @@ def show_sessions(title, sessions, option='', display=None):
     # Use vcc_cmd to start a new thread for all 'oper' displays
     message = json.dumps(sessions)
     for display in get_displays(display):
-        options = f"{option} -t '{title}' -m '{message}' -D '{display}'"
+        options = f"{option} -c '{settings.args.config}' -t '{title}' -m '{message}' -D '{display}'"
         vcc_cmd('sessions-wnd', options, user='oper', group='rtx')
-
-
-# Notify oper using vcc message_box. Pop message box to all displays or the user display
-def show_next(sta_id, display=None):
-    # Use vcc_cmd to start a new thread for all 'oper' displays
-    for display in get_displays(display):
-        options = f'{sta_id} -D "{display}"'
-        vcc_cmd('vcc', options, user='oper', group='rtx')
 
 
 def get_ddout_log():

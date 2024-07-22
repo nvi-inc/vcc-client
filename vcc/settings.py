@@ -1,3 +1,4 @@
+from pathlib import Path
 import sys
 
 from vcc import make_object, get_config_data
@@ -16,6 +17,11 @@ def init(args):
 
     # Store all arguments under args variable
     setattr(this_module, 'args', args)
+    for path in [Path(args.config if args.config else 'vcc.ctl'), Path('/usr2/control/vcc.ctl'), Path(Path.home(), 'vcc.ctl')]:
+        if path.exists():
+            args.config = str(path)
+            break
+
     if data := get_config_data(args.config):
         # Add information in config file to this module
         make_object(data, this_module)

@@ -68,7 +68,8 @@ def main():
     subparsers.add_parser('test', help='Test if config file has valid signatures')
     # INBOX subprocess
     sub = subparsers.add_parser('inbox', help='Monitor or Read inbox for group')
-    sub.add_argument('-r', '--read', help='read messages in inbox', action='store_true')
+    sub.add_argument('-i', '--interval', help='reading interval', type=int, default=0)
+    sub.add_argument('-o', '--once', help='read messages once', action='store_true')
     sub.add_argument('group', help='group id of inbox', choices=['CC', 'OC', 'AC', 'CC', 'NS'], type=str.upper)
     # SKED subprocess
     sub = subparsers.add_parser('sked', help='Upload schedule files (Operations Center only)')
@@ -80,6 +81,7 @@ def main():
     # MASTER subprocess
     sub = subparsers.add_parser('master', help='Update master (Coordinating Center only)')
     sub.add_argument('-d', '--delete', help='delete the session', action='store_true', required=False)
+    sub.add_argument('-f', '--filter', action='store_false', required=False)
     sub.add_argument('param', help='master file or session to modify')
     # DASHBOARD subprocess
     sub = subparsers.add_parser('dashboard', help='Use dashboard to monitor session')
@@ -101,7 +103,7 @@ def main():
     sub = subparsers.add_parser('help', help='VCC help')
     sub.add_argument('subject', help='subject', nargs='?', default='')
     # urgent subprocess
-    sub = subparsers.add_parser('urgent', help='start urgent interface')
+    subparsers.add_parser('urgent', help='start urgent interface')
 
     # Session type subprocess
     for code, mtype in master_types.items():
@@ -123,7 +125,7 @@ def main():
         elif args.action == 'sked':  # Upload schedule file
             upload_schedule_files(args.files, notify=not args.quiet)
         elif args.action == 'master':
-            master(args.param, args.delete) 
+            master(args.param, args.delete, args.filter)
         elif args.action == 'dashboard':
             Dashboard(args.session).exec()
         elif args.action == 'sumops':
@@ -133,7 +135,7 @@ def main():
         elif args.action == 'urgent':
             VCCMessage().exec()
         elif args.action == 'inbox':
-            check_inbox(args.group, args.read)
+            check_inbox(args.group, args.interval, args.once)
         elif args.action == 'downtime':
             downtime(args.station, args.report)
         elif args.action in master_types.keys():

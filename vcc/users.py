@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta
-
 from vcc import settings, signature, VCCError, vcc_groups
 from vcc.client import VCC, RMQclientException
 
@@ -20,27 +18,14 @@ def test_inbox(vcc, group_id, session=None):
 # Test if users in configuration file are valid
 def test_users():
     for group_id, name in vcc_groups.items():
-        code = getattr(settings.Signatures, group_id, (None, None, None))[0]
-        if code:
+        if code := getattr(settings.Signatures, group_id, (None, None, None))[0]:
             print(f'{name} {code}', end=' ')
             try:
                 with VCC(group_id) as vcc:
-                    api = vcc.get_api()
-                    rsp = api.get('/users/valid', headers=signature.make(group_id))
-                    if not rsp or not signature.validate(rsp):
+                    if not (rsp := vcc.api.get('/users/valid')):  # , headers=signature.make(group_id))
                         raise VCCError(f'has invalid response {rsp.text}')
                     print('is valid!', end=' ')
-                    ses_id = None
-                    # Testing DB needs a session code. Get the first upcoming session
-                    if group_id == 'DB':
-                        today = datetime.utcnow().date()
-                        begin, end = today - timedelta(days=2), today + timedelta(days=7)
-                        rsp = api.get('/sessions', params={'begin': begin, 'end': end, 'master': 'all'})
-                        if not rsp:
-                            raise VCCError(rsp.text)
-                        if rsp.json():
-                            ses_id = rsp.json()[0]
-                    test_inbox(vcc, group_id, ses_id)
+                    test_inbox(vcc, group_id, 'db_test' if group_id == 'DB' else None)
             except VCCError as exc:
                 print(f'test fails! [{str(exc)}]')
 
