@@ -20,6 +20,7 @@ class DDoutScanner(Thread):
     is_pcfs = re.compile(r'^(?P<time>^\d{4}\.\d{3}\.\d{2}:\d{2}:\d{2}\.\d{2})(?P<data>.*)$').match
     is_header = re.compile(r'(?P<key>#onoff# {4}source)(?P<data>.*)$').match
     is_onoff = re.compile(r'(?P<key>#onoff#VAL)(?P<data>.*)$').match
+    is_acquired = re.compile(r'.(?P<key>#trakl#)(?P<data>.*)$').match
     keys = [(re.compile(f'{separator}(?P<key>{key})(?P<data>.*)$').match, msg) for (separator, key, msg)
             in [(':', 'exper_initi', 'schedule loaded {ses_id}'),
                 (':', 'sched_end', 'schedule ended'),
@@ -27,7 +28,8 @@ class DDoutScanner(Thread):
                 (';', 'contstatus', None),
                 (';', 'cont', 'schedule continue'),
                 (':', 'scan_name=[a-zA-Z0-9-]*', '{key}'),
-                (':', 'source=[a-zA-Z0-9-+]*', '{key}')
+                (':', 'source=[a-zA-Z0-9-+]*', '{key}'),
+                ('', '#trakl# Source acquired', 'Source acquired')
                 ]
             ]
 
@@ -139,8 +141,7 @@ class DDoutScanner(Thread):
                 else:
                     last = self.open_log(path)
                     for line in self.log:
-                        rec = self.is_pcfs(line)
-                        if rec:
+                        if rec := self.is_pcfs(line):
                             timestamp, info = datetime.strptime(rec['time'], '%Y.%j.%H:%M:%S.%f'), rec['data']
                             if timestamp >= last:
                                 if not self.is_onoff_header(info) and not self.is_onoff_record(timestamp, info):

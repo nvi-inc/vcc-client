@@ -18,7 +18,6 @@ class Sessions:
               'SUBM': (50, CENTER, NO)}
 
     def __init__(self, title, sessions, master=False, display=None):
-        print('Session ', display)
         if master:
             self.header['STATUS'] = (100, W, NO)
         width = sum([info[0] for info in self.header.values()])
@@ -49,7 +48,6 @@ class Sessions:
 
         for row, ses in enumerate(sessions, 1):
             # Insert the data in Treeview widget
-            print('ses', ses)
             h, sec = divmod(ses['duration'], 3600)
             cancelled = len(ses['included']) < 2
             stations = f"{''.join(ses['included'])} -{''.join(ses['removed'])}" \
@@ -80,8 +78,7 @@ class Sessions:
 
 
 def upcoming_sessions(ses_type, code, args):
-    print('ses_type', ses_type)
-    master = {'int': 'intensive', 'std': 'standard'}.get(ses_type, ('intensive','standard'))
+    master = {'int': 'intensive', 'std': 'standard'}.get(ses_type, ('intensive', 'standard'))
 
     sta_id = code
     with VCC() as vcc:

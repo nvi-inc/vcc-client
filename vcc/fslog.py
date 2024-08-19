@@ -64,7 +64,7 @@ def upload(vcc, sta_id, ses_id, full=True, reduce=True, quiet=False):
             params = {'send_msg': True}
             if not quiet:
                 progress.start()
-            if rsp := vcc.api.post('/log', files=[('file', (file.name, file, file.format))], params=params):
+            if rsp := vcc.api.post('/logs', files=[('file', (file.name, file, file.format))], params=params):
                 status = rsp.json()
                 msg = f" done in {status['time']:.3f} seconds!"
             else:
@@ -102,7 +102,7 @@ def download_log(vcc, filename):
     success = 'failed!'
     if not (rsp := vcc.api.get(f'/sessions/{ses_id}')) or not (session := Session(rsp.json())):
         message_box(f'Get file {filename}', f"Session {ses_id} does not exist!", 'warning')
-    elif not (rsp := vcc.api.get(f'/log/{ses_id}/{sta_id}')):
+    elif not (rsp := vcc.api.get(f'/logs/{ses_id}/{sta_id}')):
         message_box(f'Get file {filename}', f"{filename} failed!\n{rsp.json().get('error', rsp.text)}", 'warning')
     elif not (found := re.match(r'.*filename=\"(?P<name>.*)\".*', rsp.headers['content-disposition'])):
         message_box(f"Download problem", f"Problem downloading {filename}\n{rsp.headers['content-disposition']}",

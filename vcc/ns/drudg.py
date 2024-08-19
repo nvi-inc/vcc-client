@@ -84,11 +84,12 @@ class DRUDG:
 
     def expect_drudg_prompts(self, child, next_selection, folder):
         # Array of possible prompts and corresponding reply
-        misc = settings.DRUDG.Misc
-        prompts = ["\r\n \?", "purge existing", "Enter TPI period in centiseconds", "Enter in cont_cal action",
-                   "Enter in cont_cal_polarity", "Enter in vsi_align", "Use setup_proc", "vdif_single_thread_per_file"]
-        replies = ['', 'y', misc.tpi_period, misc.cont_cal_action, misc.cont_cal_polarity, misc.vsi_align,
-                   misc.setup_proc, misc.vdif_single_thread_per_file]
+        # misc = settings.DRUDG.Misc
+        prompts = ["\r\n \?", "purge existing"]
+        #, "Enter TPI period in centiseconds", "Enter in cont_cal action",)
+        # "Enter in cont_cal_polarity", "Enter in vsi_align", "Use setup_proc", "vdif_single_thread_per_file"]
+        replies = ['', 'y']
+        # , misc.tpi_period, misc.cont_cal_action, misc.cont_cal_polarity, misc.vsi_align,misc.setup_proc, misc.vdif_single_thread_per_file]
         done = False
         while not done:
             try:
