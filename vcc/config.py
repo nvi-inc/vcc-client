@@ -56,7 +56,7 @@ class ConfigDecoder:
                             print('New configuration not saved!')
                             return
                 with open(self.config, 'w') as f_out:
-                    # FIx problems in old
+                    # Fix problems in old
                     f_out.write(decoded)
                     p = os.path.abspath(os.path.expanduser(keyfile))
                     if platform.system() == "Windows":

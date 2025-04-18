@@ -1,30 +1,80 @@
 import shutil
-from threading import Thread
+from threading import Thread, Event
 import traceback
 import logging
 import re
 import os
+import json
+import psutil
+import tempfile
+
+from collections import namedtuple
 from pathlib import Path
 
 from vcc import settings, make_path, vcc_cmd
 from vcc.utils import get_next_sessions
 from vcc.ns.drudg import DRUDG
-from vcc.ns import notify, show_sessions
+from vcc.ns import get_displays, show_sessions, notify
+from vcc.socket import Client
+from vcc import json_encoder, json_decoder
+
+
+Addr = namedtuple('addr', 'ip port')
 
 logger = logging.getLogger('vcc')
 
 
+def send_msg(header, data):
+    for display in get_displays():
+        if (port := get_port(display)) or (port := start_inbox(display)):
+            client = Client('127.0.0.1', port)
+            client.send(json.dumps((header, data), default=json_encoder).encode("utf-8"))
+    # Save msg in hidden directory
+    path = Path(os.environ.get('VCC_HIDDEN', '/tmp'), 'vcc-msg-ns.json')
+    path.touch(exist_ok=True)
+    with open(path, 'r+') as f:
+        records = json_decoder(json.loads(record)) if (record := f.read()) else []
+        records.append((header, data))
+        f.seek(0)
+        f.write(json.dumps(records, default=json_encoder))
+
+
+def get_port(display):
+    for index, prc in enumerate(psutil.process_iter()):
+        try:
+            if prc.name() == 'inbox-ns':
+                param = prc.cmdline()
+                if param[param.index('-D') + 1] == display:
+                    for conn in prc.net_connections():
+                        if conn.status == 'LISTEN':
+                            return Addr(*conn.laddr).port
+        except (IndexError, Exception):
+            pass
+    print('get_port', None)
+    return None
+
+
+def start_inbox(display):
+    logger.info(f"Start inbox-ns with DISPLAY {display}")
+    vcc_cmd('inbox-ns', f"-D '{display}'", user='oper', group='rtx')
+    for _ in range(5):
+        if port := get_port(display):
+            return port
+        Event().wait(1)
+    return None
+
 class ProcessMaster(Thread):
     # overriding constructor
-    def __init__(self, vcc, sta_id, data):
+    def __init__(self, vcc, sta_id, headers, data):
         # calling parent class constructor
         Thread.__init__(self)
         self.vcc, self.sta_id = vcc, sta_id
-        self.data = data if data else {}
+        self.headers, self.data = headers, data
 
     def run(self):
-        logger.debug('star processing master')
+        send_msg(self.headers, self.data)
 
+    def _run(self):
         show_sessions(f'List of modified sessions for {self.sta_id}', list(self.data.items()))
         # Get session information
         session_list, begin, end = get_next_sessions(self.vcc, self.sta_id)
@@ -39,11 +89,12 @@ class ProcessSchedule(Thread):
 
     get_name = re.compile('.*filename=\"(?P<name>.*)\".*').match
 
-    def __init__(self, vcc, sta_id, data=None):
+    def __init__(self, vcc, sta_id, headers, data):
         # calling parent class constructor
         Thread.__init__(self)
         self.vcc, self.sta_id = vcc, sta_id
         self.ses_id = data.get('session', None) if data else None
+        self.headers, self.data = headers, data
 
     @staticmethod
     def rename(download_option, path):
@@ -67,15 +118,17 @@ class ProcessSchedule(Thread):
         # Download schedule (skd first)
         download_option = settings.Messages.Schedule.download.split()[0]
         if download_option == 'no':
-            return notify(f'New schedule available for {self.ses_id}', 'Not downloaded: configuration set to NO',
-                          icon='warning')
+            self.data['processed'] = 'Schedule not downloaded: configuration set to NO'
+            return send_msg(self.headers, self.data)
         # Request file from VCC
         if not (rsp := self.vcc.api.get(f'/schedules/{self.ses_id}')):
-            return notify(f'Problem downloading schedule for {self.ses_id}', rsp.text, icon='urgent')
+            self.data['processed'] = f'Problem downloading schedule for\n\n {rsp.text}'
+            return send_msg(self.headers, self.data)
         # Save schedule in Schedules folder
         if not (found := self.get_name(rsp.headers['content-disposition'])):
-            return notify(f'Problem downloading schedule for {self.ses_id}', rsp.headers['content-disposition'],
-                          icon='urgent')
+            self.data['processed'] = f"Problem downloading schedule\n\n {rsp.headers['content-disposition']}"
+            return send_msg(self.headers, self.data)
+
         filename = found['name']
         path = make_path(settings.Folders.schedule, filename)
         modified = self.prc_snp_modified(path, self.ses_id)
@@ -87,18 +140,22 @@ class ProcessSchedule(Thread):
         drudg_it = settings.Messages.Schedule.drudg
         logger.info(f'drudg_it {drudg_it}')
         if drudg_it == 'no':
-            return notify(f'{filename} has been downloaded but not processed',
-                          'DRUDG is not set for automatic mode', icon='warning')
+            self.data['processed'] = (f'{filename} has been downloaded but not processed<br><br>'
+                                      f'DRUDG is not set for automatic mode')
+            return send_msg(self.headers, self.data)
         if modified and drudg_it == 'not_modified':
-            return notify(f'{filename} has been downloaded but not processed',
-                          '<br>'.join([f'{file} was manually modified' for file in modified]), icon='warning')
+            extra = '<br>'.join([f'{file} was manually modified' for file in modified])
+            self.data['processed'] = f'{filename} has been downloaded but not processed<br><br>{extra}'
+            return send_msg(self.headers, self.data)
         # Drug it
         try:
             sta_id = self.sta_id.lower()
             proc = DRUDG(self.ses_id, sta_id)
             err = proc.drudg(filename)
             if err:
-                return notify(f'Problem DRUDG {self.ses_id}', err, icon='urgent')
+                self.data['processed'] = (f'{filename} has been downloaded but not processed<br><br>'
+                                          f'Problem DRUDGing: {err}')
+                return send_msg(self.headers, self.data)
         except Exception as exc:
             logger.warning(str(exc))
             for index, line in enumerate(traceback.format_exc().splitlines(), 1):
@@ -115,11 +172,10 @@ class ProcessSchedule(Thread):
                             make_path(settings.Folders.proc, f'{self.ses_id}{sta_id}.prc')]]
         lst = make_path(settings.Folders.list, f'{self.ses_id}{sta_id}.lst')
         msg.append(f'{os.path.basename(lst)} {"ok" if os.path.exists(lst) else "not created"}')
-
-        icon = 'urgent' if err else 'info'
-        notify(f'New schedule for {self.ses_id}{" - problem drudging it" if err else ""}',
-               '<br>'.join(msg), icon=icon)
-        logger.debug(f'end processing schedule {self.ses_id}')
+        extra = '<br>'.join(msg)
+        self.data['icon'] = 'warning' if err else 'info'
+        self.data['processed'] = f"New schedule processed {' - problem drudging it' if err else ''}<br><br>{extra}"
+        return send_msg(self.headers, self.data)
 
 
 class ProcessLog(Thread):
@@ -136,32 +192,34 @@ class ProcessLog(Thread):
 
 
 class ProcessMsg(Thread):
+
     # overriding constructor
-    def __init__(self, vcc, sta_id, data=None):
+    def __init__(self, vcc, sta_id, headers, data):
         # calling parent class constructor
         Thread.__init__(self)
         self.vcc, self.sta_id = vcc, sta_id
-        self.data = data if data else {}
+        self.headers, self.data = headers, data
 
     def run(self):
-        if msg := self.data.get("message", ""):
-            logger.info(msg)
+        send_msg(self.headers, self.data)
 
 
 class ProcessUrgent(Thread):
     # overriding constructor
-    def __init__(self, vcc, sta_id, data=None):
+    def __init__(self, vcc, sta_id, headers, data):
         # calling parent class constructor
         Thread.__init__(self)
         self.vcc, self.sta_id = vcc, sta_id
-        self.data = data if data else {}
+        self.headers, self.data = headers, data
 
     def run(self):
+        send_msg(self.headers, self.data)
+
+    def _run(self):
         title = f'Urgent message from {self.data.get("fr", "?")}'
         msg = self.data.get("message", "EMPTY").splitlines()
         notify(title, '<br>'.join(msg), icon='urgent')
         logger.info(title)
         for index, line in enumerate(msg, 1):
             logger.info(f'{index:2d} {line}')
-
 

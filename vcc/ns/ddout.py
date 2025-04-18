@@ -141,9 +141,11 @@ class DDoutScanner(Thread):
                 else:
                     last = self.open_log(path)
                     for line in self.log:
+                        logger.info(line[:40])
                         if rec := self.is_pcfs(line):
                             timestamp, info = datetime.strptime(rec['time'], '%Y.%j.%H:%M:%S.%f'), rec['data']
                             if timestamp >= last:
+                                logger.warning(str(info))
                                 if not self.is_onoff_header(info) and not self.is_onoff_record(timestamp, info):
                                     self.send_onoff()
                                     self.send_status(info)

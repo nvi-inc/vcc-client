@@ -196,10 +196,7 @@ class SessionViewer:
         self.ac = self.get_options('/catalog/analysis')
         self.stations = self.get_stations()
 
-        print(self.session.master, self.session.master == 'intensive')
-
         self.is_intensive.set(self.session.master == 'intensive')
-        print(self.session.master, self.session.master == 'intensive', self.is_intensive.get())
         self.init_wnd()
         self.root.mainloop()
 

@@ -8,7 +8,7 @@ from base64 import urlsafe_b64decode as b64d
 from base64 import urlsafe_b64encode as b64e
 from datetime import date, datetime
 from pathlib import Path
-from subprocess import Popen
+from subprocess import Popen, PIPE
 import hashlib
 
 import toml
@@ -175,10 +175,25 @@ def vcc_cmd(action, options, user=None, group=None):
     cmd = str(Path(Path(sys.argv[0]).parent, action))
     if platform.system() == "Windows":
         cmd = cmd.replace('\\', '\\\\')
+    logger = logging.getLogger('vcc')
+    logger.info(f'command [{cmd}] {options}')
 
     # Use popen so that thread is not blocked by window message
     Popen([f'{cmd} {options}'], user=user, group=group, shell=True,
           stdin=None, stdout=None, stderr=None, close_fds=True)
+
+
+def vcc_cmd_r(action, options, user=None, group=None):
+    cmd = str(Path(Path(sys.argv[0]).parent, action))
+    if platform.system() == "Windows":
+        cmd = cmd.replace('\\', '\\\\')
+    logger = logging.getLogger('vcc')
+    logger.info(f'command [{cmd}] {options}')
+
+    # Use popen so that thread is not blocked by window message
+    prc = Popen([f'{cmd} {options}'], user=user, group=group, shell=True, stdin=None, stdout=PIPE,
+                stderr=PIPE, close_fds=True)
+    return prc.communicate()
 
 
 # Output VCC package version

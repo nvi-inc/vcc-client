@@ -1,4 +1,8 @@
-import pkg_resources
+import tkinter
+
+from pathlib import Path
+#import pkg_resources
+from importlib import resources
 import sys
 
 from tkinter import *
@@ -8,15 +12,18 @@ from tkinter import font
 class MessageBox(Toplevel):
     icons = dict(info='info', warning='warning', urgent='urgent')
 
-    def __init__(self, root, title, message, icon=None, exit_on_close=False):
+    def __init__(self, root, title, message, icon=None, exit_on_close=False, exec_fnc=None):
         super().__init__(root)
 
         self.exit_on_close = exit_on_close
+        self.exec_function = exec_fnc
 
+        print('in message box')
         message = message.replace("<br>", "\n")
 
         icon = self.icons.get(icon, self.icons['info'])
-        self.pic = PhotoImage(file=pkg_resources.resource_filename(__name__, f'images/{icon}.png'))
+        #self.pic = PhotoImage(file=pkg_resources.resource_filename(__name__, f'images/{icon}.png'))
+        self.pic = PhotoImage(file=Path(resources.files('vcc'), 'images', f'{icon}.png'))
         self.msg_icon = Label(self, image=self.pic)
         self.msg_icon.grid(row=0, column=0, padx=5, pady=5, sticky='nw')
         fd = font.nametofont("TkDefaultFont").actual()
@@ -41,7 +48,25 @@ class MessageBox(Toplevel):
         super().destroy()
         if self.exit_on_close:
             self.master.destroy()
+        if self.exec_function:
+            self.exec_function()
 
+    def refresh(self, title, message, icon=None):
+
+        icon = self.icons.get(icon, self.icons['info'])
+        self.pic = PhotoImage(file=Path(resources.files('vcc'), 'images', f'{icon}.png'))
+        self.msg_icon.config(image=self.pic)
+        self.subject.config(text=title)
+        self.message.config(text=message.replace("<br>", "\n"))
+        self.update()
+        height = self.msg_icon.winfo_reqheight() + self.message.winfo_reqheight()
+        height += self.done.winfo_reqheight() + 30
+        width = max(self.subject.winfo_reqwidth(), self.message.winfo_reqwidth()) + 10
+        width = max(400, self.msg_icon.winfo_reqwidth() + width + 10)
+        self.geometry(f"{width}x{height}")
+        self.wm_attributes("-topmost", True)
+        self.focus()
+        self.wm_attributes("-topmost", False)
 
 def main():
 
@@ -55,10 +80,15 @@ def main():
 
     args = parser.parse_args()
 
-    root = Tk(screenName=args.display)
+    try:
+        root = Tk(screenName=args.display)
+    except tkinter.TclError:
+        return
     root.withdraw()
     MessageBox(root, args.title, args.message, args.icon, exit_on_close=True)
     root.mainloop()
+
+
 
 
 if __name__ == '__main__':

@@ -84,6 +84,7 @@ class API:
         try:
             token = self.make_signature()
             headers = dict(**headers, **token) if headers else token
+            #headers['utc'] = datetime.utcnow().isoformat()
             rsp = self.session.post(url=urljoin(self.base_url, path), json=json_encoder(data), files=files,
                                     params=params, headers=headers)
             self.jwt_data = self.validate_signature(rsp) if rsp else None
@@ -96,6 +97,7 @@ class API:
         try:
             token = self.make_signature()
             headers = dict(**headers, **token) if headers else token
+            #headers['utc'] = datetime.utcnow().isoformat()
             rsp = self.session.put(url=urljoin(self.base_url, path), json=json_encoder(data), files=files,
                                    headers=headers)
             self.jwt_data = self.validate_signature(rsp) if rsp else None
@@ -157,9 +159,7 @@ class VCC:
         self.url = 'localhost'
         self.api_port, self.msg_port = tunnel.local_bind_ports
         if test:
-            logger.warning('start checking tunnel')
             tunnel.check_tunnels()
-            logger.warning(f'end checking tunnel {tunnel.tunnel_is_up}')
 
         return name, tunnel
 
@@ -171,17 +171,22 @@ class VCC:
 
     # Get first available VWS client
     def connect(self):
+        logger.debug('connecting')
         # Get list of VLBI Communications Center (VCC)
         for name, config in get_server():
             self.url, self.protocol = config.url, config.protocol
             self.api_port, self.msg_port = config.api_port, config.msg_port
             if getattr(config, 'tunnel', None):
+                logger.debug('tunnel start')
                 try:
                     self.name, self.tunnel = self.start_tunnel(name, config)
                 except (BaseSSHTunnelForwarderError, HandlerSSHTunnelForwarderError):
+                    logger.debug('tunnel problem')
                     continue
+            logger.debug('get API')
 
             self.api = API(self.group_id, self.config)
+            logger.debug('get API after')
             # Test VCC API can be reached
             if self.is_available:
                 return
@@ -202,7 +207,6 @@ class VCC:
             rsp = self.api.get('/', timeout=5)  # Not more than 5 seconds to look for web service
             return 'Welcome to VLBI Communications Center' in rsp.text if rsp else False
         except Exception as exc:
-            logger.debug(f'vcc not available - {str(exc)}')
             return False
 
     # Stop/Close all connections
@@ -210,7 +214,6 @@ class VCC:
         try:
             if self.tunnel:
                 self.tunnel.stop()
-                logger.debug('tunnel closed')
         finally:
             self.tunnel = None
 
@@ -219,7 +222,6 @@ class VCC:
 
     # Get RMQclient
     def get_rmq_client(self, ses_id=None, is_multi_thread=False):
-        logger.debug('get_rmq_client')
         # Get credentials for RMQclient
         try:
             rsp = self.api.get('/users/inbox', headers={'session': ses_id})
@@ -227,7 +229,6 @@ class VCC:
                 try:
                     client = RMQclient(is_multi_thread=is_multi_thread)
                     client.connect(make_object(dict(**self.config, **self.api.jwt_data)))
-                    logger.debug(f'get_rmq_client {client.connection.is_closed if client.connection else "NULL"}')
                     return client
                 except RMQclientException as exc:
                     raise VCCError(f'Problem at VCC messenger {str(exc)}')
@@ -237,7 +238,6 @@ class VCC:
 
     # Get RMQclient
     def get_rmq_connection(self, is_multi_thread=False):
-        logger.debug('get_rmq_connection')
         # Get credentials for RMQclient
         try:
             rsp = self.api.get('/users/connection')
@@ -265,7 +265,6 @@ class RMQclient:
         self.max_attempts = 5
         self.consumer_tag = ''
         self.id = str(uuid.uuid4()).upper()
-        logger.debug(f'rmqclient {self.id}')
 
         # Initialize some variables
         self.exchange = self.queue = None
@@ -295,9 +294,7 @@ class RMQclient:
     # Connect to broker
     def connect(self, config):
         if self.connection and not self.connection.is_closed:
-            logger.debug('rmq connection already opened')
             return
-        logger.debug('connecting to to VCC message broker')
         url, port = config.url, config.msg_port
         self.exchange, self.queue = config.exchange, config.queue
 
@@ -307,7 +304,6 @@ class RMQclient:
             parameters = pika.ConnectionParameters(host=url, port=int(port), credentials=credentials,
                                                    virtual_host=quote(config.vhost, safe=""))
             self.connection = pika.BlockingConnection(parameters)
-            logger.debug('connected to to VCC message broker')
         except pika.exceptions.AMQPConnectionError as err:
             logger.debug(f'Could not connect to VCC message broker')
             raise RMQclientException(f'Could not connect {str(err)}')
@@ -342,13 +338,21 @@ class RMQclient:
     def close(self):
         self.close_requested = True
         # Close all connections
-        logger.debug(f'close rmq connections {self.id}')
-        [self.close_it(item) for item in [self.publisher, self.connection] if item]
+        #print('consumer basic cancel')
+        #self.consumer.basic_cancel()
+        #print('consumer close')
+        #self.consumer.close()
+        #print('close publisher')
+        #self.close_it(self.publisher)
+        self.consumer.close()
+        print('connection close', self.connection.is_closed)
+        self.connection.close()
+        print('connection close', self.connection.is_closed)
+        print('None')
         self.publisher = self.consumer = self.connection = None
 
     # Thread safe function to send message
     def send(self, sender, code, key, data, reply_to='', priority=0, ttl=None, to_queue=False):
-        logger.debug(f'send : {code} {key}')
         cb = functools.partial(self._send, sender, code, key, data, reply_to, priority, ttl, to_queue)
         self.connection.add_callback_threadsafe(cb)
 
@@ -357,7 +361,6 @@ class RMQclient:
 
         conn = self.connection.is_closed if self.connection else "NULL"
         chn = self.publisher.is_closed if self.publisher else "NULL"
-        logger.debug(f'_send : {code} {key} CONN {conn} CHANNEl {chn}')
         # Detect format message
         fmt, msg = ('text', data) if isinstance(data, str) else ('json', json.dumps(data, default=json_encoder))
 
@@ -368,14 +371,13 @@ class RMQclient:
         try:
             exchange = '' if to_queue else self.exchange
             self.publisher.basic_publish(exchange, key, msg, pika.BasicProperties(**properties))
-            logger.debug(f'sent {exchange} {key}')
         except (pika.exceptions.ChannelWrongStateError, pika.exceptions.StreamLostError) as err:
             raise RMQclientException(f'publisher channel error{str(err)}')
 
     # Send a ping to specific target
-    def ping(self, target, to_queue=False, need_reply=False):
+    def ping(self, target, to_queue=False, reply_to=''):
         return self.send(self.queue, 'ping', target, 'request status', priority=5, ttl=self.ttl,
-                         to_queue=to_queue, reply_to=self.queue if need_reply else '')
+                         to_queue=to_queue, reply_to=reply_to)
 
     # Reply to ping
     def pong(self, sender, target, status):
@@ -404,34 +406,31 @@ class RMQclient:
         try:
             if self.process_timeout:
                 self.timeout_id = self.connection.call_later(self.timeout, self.on_timeout)
-            logger.debug('basic_consume')
             self.consumer.add_on_cancel_callback(self.close)
             self.consumer.basic_qos(prefetch_count=1)
             on_message_callback = functools.partial(self.new_msg)
             self.consumer.basic_consume(queue=self.queue, on_message_callback=on_message_callback, auto_ack=False)
             self.consumer_tag = self.consumer.consumer_tags[0]
 
-            logger.debug('start consumer')
             self.consumer.start_consuming()
         except (pika.exceptions.ConnectionClosedByBroker, pika.exceptions.ConnectionClosed,
                 pika.exceptions.AMQPError, pika.exceptions.StreamLostError, Exception) as err:
             raise RMQclientException(f'Monit connection lost {str(err)}')
+        except Exception as exc:
+            print('Monit exception', str(exc))
 
     def new_msg(self, ch, method, properties, body):
-        logger.debug(f'MSG {method.delivery_tag}')
         self._last_msg = (ch, method)
-        logger.debug(f'new_msg {properties.headers} {body}')
         if properties.headers.get('type', 'unknown') == 'vlbi':  # Valid VLBI message
             if self.process_timeout:
                 self.reset_timeout()
-            self.process_msg(properties.headers, body)
+            self.process_msg(properties, body)
         else:
-            logger.debug('Acknowledge bad message')
             self.acknowledge_msg()
 
     def keep_connection_alive(self):
         try:
-            if (datetime.now() - self.last_data_events).total_seconds() > 30:
+            if (datetime.now() - self.last_data_events).total_seconds() > 10:
                 self.last_data_events = datetime.now()
                 self.connection.process_data_events()
         except pika.exceptions.AMQPConnectionError as err:
@@ -468,7 +467,6 @@ class RMQclient:
     def _acknowledge_msg(self):
         try:
             ch, method = self._last_msg
-            logger.debug(f'ACK {method.delivery_tag}')
             ch.basic_ack(method.delivery_tag)
         except Exception as ex:
             logger.debug(f'Could not ACK last message {str(ex)}')

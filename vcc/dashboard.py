@@ -1,4 +1,6 @@
 import json
+import traceback
+
 import math
 import sys
 from datetime import datetime, timedelta
@@ -20,6 +22,8 @@ class Inbox(threading.Thread):
         super().__init__()
 
         self.rmq_client, self.messages = vcc.get_rmq_client(ses_id), messages
+        self.ping = Ping(self.rmq_client.queue, vcc)
+        self.ping.start()
 
     def run(self):
         try:
@@ -28,13 +32,47 @@ class Inbox(threading.Thread):
             pass
 
     def stop(self):
+        if self.ping:
+            self.ping.stop()
         self.rmq_client.close()
 
-    def process_message(self, headers, data):
+    def process_message(self, properties, data):
         self.rmq_client.acknowledge_msg()  # Always acknowledge message
-        print('headers', headers)
-        print('data', data)
-        self.messages.put((headers, data))  # Send message to dashboard
+        self.messages.put((properties.headers, data))  # Send message to dashboard
+
+    def ping_stations(self, network, period=10):
+        self.ping.network(network, period)
+        pass
+
+
+class Ping(threading.Thread):
+
+    def __init__(self, queue, vcc):
+        super().__init__()
+
+        self.stopped = threading.Event()
+        self.queue = queue
+        self.rmq_client = vcc.get_rmq_connection()
+        self.stations = []
+        self.delta = timedelta(seconds=1)
+
+    def network(self, stations, period):
+        self.stations = stations
+        self.delta = timedelta(seconds=period)
+
+    def run(self):
+        try:
+            while True:
+                t1 = datetime.utcnow()
+                for sta in self.stations:
+                    self.rmq_client.ping(f'NS-{sta.upper()}', reply_to=self.queue)
+                if self.stopped.wait((t1 + self.delta - datetime.utcnow()).total_seconds()):
+                    break
+        except RMQclientException:
+            pass
+
+    def stop(self):
+        self.stopped.set()
 
 
 class Urgent(tk.Toplevel):
@@ -121,25 +159,33 @@ class StationLog:
             self.box = scrolledtext.ScrolledText(self.top, font=("TkFixedFont",))
             self.box.pack(expand=tk.TRUE, fill=tk.BOTH)
             self.box.configure(state='disabled')
+            self.box.tag_configure('problem', foreground='red')
+            self.box.tag_configure('valid', foreground='black')
             self.top.geometry("650x200")
             self.top.protocol("WM_DELETE_WINDOW", self.done)
-            for utc, text in self.data:
-                self.insert(utc, text)
-        self.top.focus()
+            for utc, text, status in self.data:
+                self.insert(utc, text, status)
+        #self.top.attributes('-topmost', True)
+        #self.top.after_idle(self.top.attributes, '-topmost', False)
+        self.top.lift()
+        self.top.focus_force()
+        #self.top.wm_attributes("-topmost", True)
+        #self.top.focus()
+        #self.top.wm_attributes("-topmost", False)
 
     def done(self):
         self.top.destroy()
         self.top = None
 
-    def insert(self, utc, text):
+    def insert(self, utc, text, status='valid'):
         self.box.configure(state='normal')
-        self.box.insert(tk.END, f'{utc:%Y-%m-%d %H:%M:%S} - {text}\n')
+        self.box.insert(tk.END, f'{utc:%Y-%m-%d %H:%M:%S} - {text}\n', status)
         self.box.configure(state='disabled')
 
-    def add(self, utc, text):
-        self.data.append((utc, text))
+    def add(self, utc, text, status='valid'):
+        self.data.append((utc, text, status))
         if self.top:
-            self.insert(utc, text)
+            self.insert(utc, text, status)
 
 
 # Dashboard displaying session activities.
@@ -166,12 +212,13 @@ class Dashboard(tk.Tk):
         self.status = self.st_label = None
         self.stations = None
         self.timer = None  # Timer(self.utc, self.update_status)
-        self.stopped = threading.Event()
         self.sefds = {}
         self.messages = queue.Queue()
         self.inbox = Inbox(ses_id, self.vcc, self.messages)
         self.logs = {sta_id: StationLog(self, sta_id) for sta_id in self.session.network}
         self.scans = {}
+        self.comm_status, self.ping_period = {}, 10
+        self.lost_comm = timedelta(seconds=self.ping_period * 3)
 
     def init_wnd(self):
         # Set the size of the tkinter window
@@ -212,6 +259,9 @@ class Dashboard(tk.Tk):
     def station_clicked(self, event):
         row, col = self.stations.identify_row(event.y), self.stations.identify_column(event.x)
         if row:
+            if not self.comm_status[row]:
+                self.stations.selection_remove(row)
+                self.stations.item(row, tags=('problem',))
             if col == '#3' and self.sefds.get(row):
                 self.sefds[row].show()
             elif col == '#5':
@@ -230,7 +280,7 @@ class Dashboard(tk.Tk):
         vsb.place(width=20, height=height)
         vsb.pack(side='right', fill='y')
         self.stations.configure(yscrollcommand=vsb.set)
-        self.stations.tag_configure('cancelled', background="red")
+        self.stations.tag_configure('problem', background="red")
 
         for col, (key, info) in enumerate(header.items(), 0):
             self.stations.column(f"{col}", anchor=info[1], minwidth=0, width=info[0], stretch=info[2])
@@ -238,7 +288,11 @@ class Dashboard(tk.Tk):
 
         for sta in self.session.network:
             self.stations.insert('', 'end', sta.capitalize(), values=(sta.capitalize(), 'None', 'N/A'), tags=('all',))
-        self.stations.tag_configure('all', background='white')
+            self.comm_status[sta] = datetime.utcnow()
+
+        self.inbox.ping_stations(self.session.network)
+
+        self.stations.tag_configure('valid', background='white')
         self.stations.bind('<ButtonRelease-1>', self.station_clicked)
         self.stations.pack(expand=tk.YES, fill=tk.BOTH)
         frame.pack(expand=tk.YES, fill=tk.BOTH)
@@ -252,6 +306,18 @@ class Dashboard(tk.Tk):
         frame.configure(height=button.winfo_reqheight()+10)
         frame.pack(expand=tk.NO, fill=tk.BOTH)
         return frame
+
+    def check_comm_status(self, utc):
+        for sta_id, t in self.comm_status.items():
+            if not t or utc - t > self.lost_comm:
+                self.update_station_info(sta_id, '#5', "off line")
+                self.stations.item(sta_id, tags=('problem',))
+                if t:
+                    self.logs.get(sta_id).add(utc, "off line", status='problem')
+                self.comm_status[sta_id] = None
+            else:
+                self.stations.item(sta_id, tags=('valid',))
+
 
     def update_status(self, utc):
         status = self.session.get_status()
@@ -313,27 +379,17 @@ class Dashboard(tk.Tk):
     def done(self):
         try:
             self.inbox.stop()
-            self.inbox.join()
             self.destroy()
         except Exception as exc:
-            sys.exit(0)
-
-    def run_timer(self):
-        try:
-            while not self.stopped.is_set():
-                dt = datetime.utcnow().timestamp() % 1
-                waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
-                threading.Event().wait(waiting_time)
-                utc = datetime.utcnow()
-                self.utc.set(f'{utc:%Y-%m-%d %H:%M:%S} UTC')
-                self.update_status(utc)
-        except Exception as exc:
-            print('timer loop failed', str(exc))
+            print('Problem closing dashboard', str(exc))
+            print(traceback.format_exc())
+            sys.exit()
 
     def update_clock(self):
         utc = datetime.utcnow()
         self.utc.set(f'{utc:%Y-%m-%d %H:%M:%S} UTC')
         self.update_status(utc)
+        self.check_comm_status(utc)
         dt = datetime.utcnow().timestamp() % 1
         waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
         self.after(int(waiting_time*1000), self.update_clock)
@@ -343,6 +399,10 @@ class Dashboard(tk.Tk):
             self.stations.set(sta_id, col, text)
         except TclError:
             pass
+
+    def process_pong(self, headers, data):
+        if sta_id := headers.get('sender'):
+            self.comm_status[sta_id] = datetime.utcnow()
 
     def process_sta_info(self, headers, data):
         sta_id = data.get('station', None)
@@ -410,14 +470,11 @@ class Dashboard(tk.Tk):
         while not self.messages.empty():
             nbr += 1
             headers, command = self.messages.get()
-            print('process headers', headers)
-            print('process command', command)
             # Decode command
             if headers['format'] == 'json':
                 command = json.loads(command)
             code = headers['code']
             name = f'process_{code}'
-            print('process', name)
             # Call function for this specific code
             if hasattr(self, name):
                 getattr(self, name)(headers, command)

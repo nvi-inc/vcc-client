@@ -2,13 +2,18 @@ import json
 import re
 import traceback
 import logging
+
+from collections import namedtuple
 from threading import Thread, Event
 
 from vcc.client import RMQclientException
 from vcc.ns.processes import ProcessMaster, ProcessSchedule, ProcessLog, ProcessMsg, ProcessUrgent
 
+Addr = namedtuple('addr', 'ip port')
+
 logger = logging.getLogger('vcc')
 
+process = dict(master=ProcessMaster, schedule=ProcessSchedule, log=ProcessLog, msg=ProcessMsg, urgent=ProcessUrgent)
 
 class InboxMonitor(Thread):
 
@@ -56,28 +61,21 @@ class InboxMonitor(Thread):
         Event().wait(1)
         self.rmq_client.close()
 
-    def process_message(self, headers, data):
+    def process_message(self, properties, data):
+        headers = properties.headers
         # Ping sent by dashboard
         code = headers['code']
         logger.debug(f'{headers} {data}')
         if code == 'ping':
-            self.rmq_client.pong(self.sta_id, headers.get('reply_to'), 'Ok')
+            self.rmq_client.pong(self.sta_id, properties.reply_to, 'Ok')
         else:
             # Decode message
             try:
                 data = json.loads(data) if headers.get('format', 'text') == 'json' else {}
                 text = ', '.join([f'{key}={val}' for key, val in data.items()]) if isinstance(data, dict) else str(data)
                 logger.info(f'processing message: {code} {text}')
-                if code == 'master':
-                    ProcessMaster(self.vcc, self.sta_id, data).start()
-                elif code == 'schedule':
-                    ProcessSchedule(self.vcc, self.sta_id, data).start()
-                elif code == 'log':
-                    ProcessLog(self.vcc, self.sta_id, data).start()
-                elif code == 'msg':
-                    ProcessMsg(self.vcc, self.sta_id, data).start()
-                elif code == 'urgent':
-                    ProcessUrgent(self.vcc, self.sta_id, data).start()
+                if prc := process.get(code):
+                    prc(self.vcc, self.sta_id, headers, data).start()
             except Exception as exc:
                 logger.warning(f'message invalid -  0 {str(exc)}')
                 for index, line in enumerate(traceback.format_exc().splitlines(), 1):

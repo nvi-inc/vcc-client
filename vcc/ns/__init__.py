@@ -18,16 +18,14 @@ def get_displays(display=None):
     if display:
         return [display]
     displays = []
-    oper = [user.pid for user in psutil.users() if user.name == 'oper']
     for prc in psutil.process_iter():
-        for parent in prc.parents():
-            if parent.pid in oper:
-                try:
-                    displays.append(prc.environ().get('DISPLAY', None))
-                finally:
-                    break
+        try:
+            displays.append(prc.environ().get('DISPLAY', None))
+        except:
+            pass
 
     return list(filter(None, list(set(displays))))
+
 
 
 # Notify oper using vcc message_box. Pop message box to all displays or the user display

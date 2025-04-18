@@ -69,7 +69,6 @@ def main():
     # INBOX subprocess
     sub = subparsers.add_parser('inbox', help='Monitor or Read inbox for group')
     sub.add_argument('-i', '--interval', help='reading interval', type=int, default=0)
-    sub.add_argument('-o', '--once', help='read messages once', action='store_true')
     sub.add_argument('group', help='group id of inbox', choices=['CC', 'OC', 'AC', 'CC', 'NS'], type=str.upper)
     # SKED subprocess
     sub = subparsers.add_parser('sked', help='Upload schedule files (Operations Center only)')
@@ -135,7 +134,7 @@ def main():
         elif args.action == 'urgent':
             VCCMessage().exec()
         elif args.action == 'inbox':
-            check_inbox(args.group, args.interval, args.once)
+            check_inbox(args.group, args.interval)
         elif args.action == 'downtime':
             downtime(args.station, args.report)
         elif args.action in master_types.keys():

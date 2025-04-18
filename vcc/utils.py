@@ -181,13 +181,14 @@ def get_next_sessions(vcc, sta_id=None, start=None, end=None, days=14):
     begin = to_date(start, today)
     end = datetime.combine(to_date(end, begin + timedelta(days=days)).date(), datetime.max.time())
     if sta_id:
-        if vcc.api.get(f'/stations/{sta_id}'):
+        if ans:= vcc.api.get(f'/stations/{sta_id}'):
             sessions = json_decoder(vcc.api.get(f'/sessions/next/{sta_id}',
                                                 params={'days': days,
                                                         'begin': to_date(start, ''),
                                                         'end': to_date(end, '')}
                                                 ).json())
         else:
+            print(ans.text)
             vcc_cmd('message-box', f'-t "Station {sta_id.capitalize()} does not exist" -m "" -i "warning"')
             sessions = None
     else:

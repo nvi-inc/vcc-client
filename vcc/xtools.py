@@ -4,7 +4,7 @@ import tkinter
 
 from datetime import datetime, timedelta
 
-from tkinter import *
+import tkinter as tk
 from tkinter import ttk
 
 from vcc import settings, json_decoder, vcc_cmd
@@ -12,28 +12,32 @@ from vcc.client import VCC
 from vcc.utils import master_types, get_next_sessions
 
 
-class Sessions:
-    header = {'ID': (25, E, NO), 'CODE': (100, W, NO), 'TYPE': (125, W, NO), 'DATE': (100, CENTER, NO),
-              'TIME': (50, CENTER, NO), 'DUR': (50, CENTER, NO),
-              'STATIONS': (300, W, YES), 'SKED': (50, CENTER, NO), 'CORR': (50, CENTER, NO),
-              'SUBM': (50, CENTER, NO)}
+class Sessions(tk.Toplevel):
+    header = {'ID': (25, tk.E, tk.NO), 'CODE': (100, tk.W, tk.NO), 'TYPE': (125, tk.W, tk.NO),
+              'DATE': (100, tk.CENTER, tk.NO), 'TIME': (50, tk.CENTER, tk.NO), 'DUR': (50, tk.CENTER, tk.NO),
+              'STATIONS': (300, tk.W, tk.YES), 'SKED': (50, tk.CENTER, tk.NO), 'CORR': (50, tk.CENTER, tk.NO),
+              'SUBM': (50, tk.CENTER, tk.NO)}
 
-    def __init__(self, title, sessions, master=False, display=None):
+    def __init__(self, root, title, sessions, master=False, header_wnd=None):
+        super().__init__(root)
         if master:
-            self.header['STATUS'] = (100, W, NO)
+            self.header['STATUS'] = (100, tk.W, tk.NO)
         width = sum([info[0] for info in self.header.values()])
         height = 350 if len(sessions) > 7 else 200
-
-        root = Tk(screenName=display)
+        extra_heigth = 0
         # Set the size of the tkinter window
-        root.geometry(f"{width+20}x{height+30}")
-        root.title(title)
+        self.geometry(f"{width+20}x{height+30}")
+        self.title(title)
 
-        style = ttk.Style(root)
-        style.theme_use('clam')
+        # Add a frame for header_wnd
+        if header_wnd:
+            frame_hdr = header_wnd(self)
+            frame_hdr.pack(expand=tk.NO, fill=tk.BOTH)
+            frame_hdr.update()
+            extra_heigth = frame_hdr.winfo_reqheight()
 
         # Add a frame for TreeView
-        frame1 = Frame(root, height=height)
+        frame1 = tk.Frame(self, height=height)
         # Add a Treeview widget
         self.tree = ttk.Treeview(frame1, column=list(self.header.keys()), show='headings', height=5)
         self.tree.place(width=width, height=height)
@@ -63,16 +67,19 @@ class Sessions:
             self.tree.insert('', 'end', text="1", values=values, tag="cancelled" if cancelled else "")
 
         self.tree.bind("<Double-1>", self.on_double_click)
-        self.tree.pack(expand=YES, fill=BOTH)
-        frame1.pack(expand=YES, fill=BOTH)
+        self.tree.pack(expand=tk.YES, fill=tk.BOTH)
+        frame1.pack(expand=tk.YES, fill=tk.BOTH)
 
-        frame2 = Frame(root, height=30)
+        frame2 = tk.Frame(self, height=30)
 
-        exit_button = Button(frame2, text="Done", command=root.destroy)
+        exit_button = tk.Button(frame2, text="Done", command=self.destroy)
         exit_button.pack(pady=5)
-        frame2.pack(expand=NO, fill=BOTH)
+        frame2.pack(expand=tk.NO, fill=tk.BOTH)
 
-        root.mainloop()
+        self.geometry(f"{width + 20}x{height + extra_heigth + 30}")
+        self.update()
+
+        #root.mainloop()
 
     def on_double_click(self, event):
         item = self.tree.item(self.tree.identify('row', event.x, event.y))
