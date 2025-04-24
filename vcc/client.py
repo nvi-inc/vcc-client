@@ -338,17 +338,8 @@ class RMQclient:
     def close(self):
         self.close_requested = True
         # Close all connections
-        #print('consumer basic cancel')
-        #self.consumer.basic_cancel()
-        #print('consumer close')
-        #self.consumer.close()
-        #print('close publisher')
-        #self.close_it(self.publisher)
         self.consumer.close()
-        print('connection close', self.connection.is_closed)
         self.connection.close()
-        print('connection close', self.connection.is_closed)
-        print('None')
         self.publisher = self.consumer = self.connection = None
 
     # Thread safe function to send message

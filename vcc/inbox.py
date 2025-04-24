@@ -144,19 +144,34 @@ class DowntimeMsg(BaseMessage):
     def __init__(self, utc, code, status, data):
         super().__init__(utc, code, status, data)
 
+        print('Downtime', data)
+        print('start', type(data['start']))
         self._sta_code = data['station'].capitalize()
         self.cancelled = data.get('cancelled', False)
-        self._start = self.start.strftime('%Y-%m-%d')
-        self._end = self.end.strftime('%Y-%m-%d') if self.end else 'unknown'
+        self._start, self._end = self.start(data['start']), self.end(data['end'])
         self._sessions = []
         self._title = f"{self._sta_code} downtime {self._start} to {self._end}{' - CANCELLED' if self.cancelled else ''}"
+
+    def start(self, value):
+        if isinstance(value, str):
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        return value.date() if isinstance(value, datetime) else value
+
+    def end(self, value):
+        if not value:
+            return self._start + timedelta(days=14)
+        if isinstance(value, str):
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        return value.date() if isinstance(value, datetime) else value
 
     def show(self, parent, group_id):
         if not self._sessions:
             with VCC(group_id) as vcc:
-                rsp = vcc.api.get(f"/sessions/next/{self._data['station']}",
-                                  params={'begin': self._start, 'end': self._end})
-                for ses_id in rsp.json():
+                if not (sessions := self._data.get('sessions', [])):
+                    rsp = vcc.api.get(f"/sessions/next/{self._data['station']}",
+                                      params={'begin': self._start, 'end': self._end})
+                    sessions = rsp.json()
+                for ses_id in sessions:
                     session = json_decoder(vcc.api.get(f'/sessions/{ses_id}').json())
                     session['status'] = (f"{self._sta_code} "
                                          f"{'down' if self._sta_code in session['removed'] else 'available'}")
