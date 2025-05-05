@@ -53,7 +53,6 @@ class Watcher(threading.Thread):
         self.vcc, self.messages = vcc, messages
         self.vcc.api.get('/users/inbox', headers={'expire': 'no', 'session': ses_id})
         self.queue = self.vcc.api.jwt_data.get('queue')
-        print(self.queue)
         self.ping = ApiPing(self.queue, self.vcc)
         self.ping.start()
         self.stopped = threading.Event()
@@ -69,7 +68,7 @@ class Watcher(threading.Thread):
 
     def delete_inbox(self):
         try:
-            print(self.vcc.api.delete(f'/users/inbox', headers={'queue': self.queue}).text)
+            self.vcc.api.delete(f'/users/inbox', headers={'queue': self.queue})
         except Exception as exc:
             print('EXC', str(exc))
 
@@ -388,10 +387,10 @@ class Dashboard(tk.Tk):
     def check_comm_status(self, utc):
         for sta_id, t in self.comm_status.items():
             if not t or utc - t > self.lost_comm:
-                self.update_station_info(sta_id, '#5', "off line")
+                self.update_station_info(sta_id, '#5', "not connected to VCC")
                 self.stations.item(sta_id, tags=('problem',))
                 if t:
-                    self.logs.get(sta_id).add(utc, "off line", status='problem')
+                    self.logs.get(sta_id).add(utc, "not connected to VCC", status='problem')
                 self.comm_status[sta_id] = None
             else:
                 self.stations.item(sta_id, tags=('valid',))
