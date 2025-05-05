@@ -55,9 +55,23 @@ class ConfigDecoder:
                         if answer == 'n':
                             print('New configuration not saved!')
                             return
+
+                # Select access method for vcc. https or ssh tunnel
+                while True:
+                    if (option := input('Please select method for accessing VCC'
+                                        '\n\t1 - https\n\t2 - ssh tunnel\n\tq - quit setup\n\t').lower()) in '12q':
+                        if option == 'q':
+                            print('Configuration terminated.')
+                            return
+                        break
+                key_words = ['protocol:https', 'tunnel:']
+                comment = key_words[1] if option == '1' else key_words[0]
+                for index, line in enumerate(lines := decoded.splitlines()):
+                    if comment in line:
+                        lines[index] = f'# {line}'
                 with open(self.config, 'w') as f_out:
                     # Fix problems in old
-                    f_out.write(decoded)
+                    f_out.write('\n'.join(lines))
                     p = os.path.abspath(os.path.expanduser(keyfile))
                     if platform.system() == "Windows":
                         p = p.replace('\\', '\\\\')

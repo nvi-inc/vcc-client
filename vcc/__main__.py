@@ -84,6 +84,7 @@ def main():
     sub.add_argument('param', help='master file or session to modify')
     # DASHBOARD subprocess
     sub = subparsers.add_parser('dashboard', help='Use dashboard to monitor session')
+    sub.add_argument('-i', '--interval', help='reading interval', type=int, default=0)
     sub.add_argument('session', help='session code')
     # DOWNTIME subprocess
     sub = subparsers.add_parser('downtime', help='Use dashboard to monitor session')
@@ -126,7 +127,7 @@ def main():
         elif args.action == 'master':
             master(args.param, args.delete, args.filter)
         elif args.action == 'dashboard':
-            Dashboard(args.session).exec()
+            Dashboard(args.session, args.interval).exec()
         elif args.action == 'sumops':
             sumops(args)
         elif args.action == 'fetch':

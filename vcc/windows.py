@@ -18,10 +18,10 @@ class MessageBox(Toplevel):
         self.exit_on_close = exit_on_close
         self.exec_function = exec_fnc
 
-        print('in message box')
         message = message.replace("<br>", "\n")
 
         icon = self.icons.get(icon, self.icons['info'])
+        self.title(icon.capitalize())
         #self.pic = PhotoImage(file=pkg_resources.resource_filename(__name__, f'images/{icon}.png'))
         self.pic = PhotoImage(file=Path(resources.files('vcc'), 'images', f'{icon}.png'))
         self.msg_icon = Label(self, image=self.pic)
@@ -67,6 +67,7 @@ class MessageBox(Toplevel):
         self.wm_attributes("-topmost", True)
         self.focus()
         self.wm_attributes("-topmost", False)
+
 
 def main():
 

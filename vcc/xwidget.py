@@ -11,7 +11,10 @@ class XCombobox(ttk.Combobox):
         self.var = tk.StringVar(parent)
         kwargs['textvariable'] = self.var
         if 'postcommand' in kwargs:
-            self.var.trace('w', callback=kwargs['postcommand'])
+            try:
+                self.var.trace('w', callback=kwargs['postcommand'])
+            except tk.TclError:
+                self.var.trace_add('write', callback=kwargs['postcommand'])
             kwargs['postcommand'] = None
 
         super().__init__(parent, **kwargs)
@@ -34,7 +37,10 @@ class XEntry(tk.Entry):
     def __init__(self, parent, text='', on_change=None, **kwargs):
         self.var = tk.StringVar(parent, text)
         if on_change:
-            self.var.trace('w', on_change)
+            try:
+                self.var.trace('w', on_change)
+            except tk.TclError:
+                self.var.trace_add('write', on_change)
         kwargs['textvariable'] = self.var
         super().__init__(parent, **kwargs)
 
@@ -97,7 +103,10 @@ class XDate(DateEntry):
 
         self.default_parse_date, self.parse_date = self.parse_date, self.modified_parse_date
         self.bind("<<DateEntrySelected>>", callback)
-        self.value.trace_variable('w', callback)
+        try:
+            self.value.trace_variable('w', callback)
+        except tk.TclError:
+            self.value.trace_add('write', callback)
 
     def set_date(self, date):
         old = self.cget('state')
@@ -129,7 +138,10 @@ class AutoComplete(tk.Entry):
         self.choices, self.max_rows, self.separator = choices, max_rows, separator
         self.frame = None
         self.listbox = self.scrollbar = None
-        self.var.trace('w', self.changed)
+        try:
+            self.var.trace('w', self.changed)
+        except tk.TclError:
+            self.var.trace_add('write', self.changed)
         self.bind_entry()
         self.bind('<FocusOut>', self.focus_out, is_outside=False)
 

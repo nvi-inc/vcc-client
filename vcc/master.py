@@ -134,7 +134,11 @@ class VCCEntry(Entry):
         self.value.set(text)
         super().__init__(frame, textvariable=self.value, width=width)
         if on_edited:
-            self.value.trace_variable('w', on_edited)
+            try:
+                self.value.trace_variable('w', on_edited)
+            except TclError:
+                self.value.trace_add('write', on_edited)
+
 
     def reset(self, state, text):
         self.value.set(text)

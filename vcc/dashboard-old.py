@@ -45,52 +45,6 @@ class Inbox(threading.Thread):
         pass
 
 
-class Watcher(threading.Thread):
-
-    def __init__(self, ses_id, vcc, messages, period=1):
-        super().__init__()
-
-        self.vcc, self.messages = vcc, messages
-        self.vcc.api.get('/users/inbox', headers={'expire': 'no', 'session': ses_id})
-        self.queue = self.vcc.api.jwt_data.get('queue')
-        print(self.queue)
-        self.ping = ApiPing(self.queue, self.vcc)
-        self.ping.start()
-        self.stopped = threading.Event()
-        self.period = period
-
-    def check_inbox(self):
-        try:
-            if rsp := self.vcc.api.get(f'/messages', headers={'queue': self.queue}):
-                for headers, data in rsp.json():
-                    self.messages.put((headers, data))  # Send message to dashboard
-        except Exception as exc:
-            print('EXC', str(exc))
-
-    def delete_inbox(self):
-        try:
-            print(self.vcc.api.delete(f'/users/inbox', headers={'queue': self.queue}).text)
-        except Exception as exc:
-            print('EXC', str(exc))
-
-    def ping_stations(self, network, period=10):
-        self.ping.network(network, period)
-
-    def run(self):
-        try:
-            self.check_inbox()
-            while not self.stopped.wait(self.period):
-                self.check_inbox()
-            self.delete_inbox()
-        except Exception as exc:
-            print('EXC', str(exc))
-
-    def stop(self):
-        if self.ping:
-            self.ping.stop()
-        self.stopped.set()
-
-
 class Ping(threading.Thread):
 
     def __init__(self, queue, vcc):
@@ -112,35 +66,6 @@ class Ping(threading.Thread):
                 t1 = datetime.utcnow()
                 for sta in self.stations:
                     self.rmq_client.ping(f'NS-{sta.upper()}', reply_to=self.queue)
-                if self.stopped.wait((t1 + self.delta - datetime.utcnow()).total_seconds()):
-                    break
-        except RMQclientException:
-            pass
-
-    def stop(self):
-        self.stopped.set()
-
-
-class ApiPing(threading.Thread):
-
-    def __init__(self, queue, vcc):
-        super().__init__()
-
-        self.stopped = threading.Event()
-        self.queue = queue
-        self.vcc = vcc
-        self.stations = []
-        self.delta = timedelta(seconds=5)
-
-    def network(self, stations, period):
-        self.stations = [f'NS-{sta.upper()}' for sta in stations]
-        self.delta = timedelta(seconds=period)
-
-    def run(self):
-        try:
-            while True:
-                t1 = datetime.utcnow()
-                self.vcc.api.post(f'/messages/ping', headers={'queue': self.queue}, data={'keys': self.stations})
                 if self.stopped.wait((t1 + self.delta - datetime.utcnow()).total_seconds()):
                     break
         except RMQclientException:
@@ -266,7 +191,7 @@ class StationLog:
 # Dashboard displaying session activities.
 class Dashboard(tk.Tk):
 
-    def __init__(self, ses_id, interval):
+    def __init__(self, ses_id):
         try:
             super().__init__()
         except TclError as exc:
@@ -289,10 +214,7 @@ class Dashboard(tk.Tk):
         self.timer = None  # Timer(self.utc, self.update_status)
         self.sefds = {}
         self.messages = queue.Queue()
-        if interval > 0:
-            self.inbox = Watcher(ses_id, self.vcc, self.messages, interval)
-        else:
-            self.inbox = Inbox(ses_id, self.vcc, self.messages)
+        self.inbox = Inbox(ses_id, self.vcc, self.messages)
         self.logs = {sta_id: StationLog(self, sta_id) for sta_id in self.session.network}
         self.scans = {}
         self.comm_status, self.ping_period = {}, 10
@@ -586,13 +508,12 @@ def main():
 
     parser = argparse.ArgumentParser(description='Edit Station downtime')
     parser.add_argument('-c', '--config', help='config file', required=False)
-    parser.add_argument('-i', '--interval', help='check inbox interval', type=int, required=False)
     parser.add_argument('session', help='station code', nargs='?')
 
     args = settings.init(parser.parse_args())
 
     try:
-        Dashboard(args.session, args.interval).exec()
+        Dashboard(args.session).exec()
     except VCCError as exc:
         messagebox.showerror(f'{args.session.upper()} failed', str(exc))
 

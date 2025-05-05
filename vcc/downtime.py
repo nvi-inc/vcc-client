@@ -185,13 +185,12 @@ class Downtime(tk.Tk):
 
         # Define some styles for ttk widgets
         self.style = ttk.Style(self)
-        self.style.theme_use('default')
+        self.style.theme_use('clam')
         self.style.configure('LLabel.TLabel', anchor='west', padding=(5, 5, 5, 5))
         self.style.configure('Action.TButton', anchor='center', padding=(5, 5, 5, 5))
         self.style.configure('TButton', anchor='center', padding=(5, 5, 5, 5))
         self.style.configure('Options.TMenubutton', anchor='west', padding=(5, 0, 5, 0))
         self.style.configure('Scans.TCombobox', anchor='west', padding=(5, 0, 5, 0))
-
         # Draw main frame with all sections
         main_frame = ttk.Frame(self, padding=(5, 5, 5, 5))
         self.viewer = Viewer(main_frame, self.records)
