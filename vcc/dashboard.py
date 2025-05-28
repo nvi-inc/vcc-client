@@ -1,88 +1,61 @@
 import json
 import traceback
-
+import time
 import math
 import sys
 from datetime import datetime, timedelta
 import threading
 import queue
-
+from copy import deepcopy
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, TclError
 
+import requests
+
 from vcc import settings, VCCError, json_decoder, vcc_cmd
-from vcc.client import VCC, RMQclientException
+from vcc.client import VCC
 from vcc.session import Session
 from vcc.windows import MessageBox
 
 
-class Inbox(threading.Thread):
+class InboxWatcher(threading.Thread):
 
-    def __init__(self, ses_id, vcc, messages):
-        super().__init__()
-
-        self.rmq_client, self.messages = vcc.get_rmq_client(ses_id), messages
-        self.ping = Ping(self.rmq_client.queue, vcc)
-        self.ping.start()
-
-    def run(self):
-        try:
-            self.rmq_client.monit(self.process_message)
-        except RMQclientException as exc:
-            pass
-
-    def stop(self):
-        if self.ping:
-            self.ping.stop()
-        self.rmq_client.close()
-
-    def process_message(self, properties, data):
-        self.rmq_client.acknowledge_msg()  # Always acknowledge message
-        self.messages.put((properties.headers, data))  # Send message to dashboard
-
-    def ping_stations(self, network, period=10):
-        self.ping.network(network, period)
-        pass
-
-
-class Watcher(threading.Thread):
-
-    def __init__(self, ses_id, vcc, messages, period=1):
+    def __init__(self, ses_id, vcc, messages, interval=5):
         super().__init__()
 
         self.vcc, self.messages = vcc, messages
-        self.vcc.api.get('/users/inbox', headers={'expire': 'no', 'session': ses_id})
-        self.queue = self.vcc.api.jwt_data.get('queue')
-        self.ping = ApiPing(self.queue, self.vcc)
+        self.vcc.connect()
+        self.vcc.get('/users/inbox', headers={'expire': 'no', 'session': ses_id})
+        self.queue = self.vcc.jwt_data.get('queue')
+        self.ping = Ping(self.queue, self.vcc)
         self.ping.start()
         self.stopped = threading.Event()
-        self.period = period
+        self.interval = max(interval, 5)
 
     def check_inbox(self):
+        t0 = time.time()
         try:
-            if rsp := self.vcc.api.get(f'/messages', headers={'queue': self.queue}):
+            if rsp := self.vcc.get(f'/messages', headers={'queue': self.queue}):
                 for headers, data in rsp.json():
                     self.messages.put((headers, data))  # Send message to dashboard
-        except Exception as exc:
-            print('EXC', str(exc))
+        except VCCError as exc:
+            pass
+        return time.time() - t0
 
     def delete_inbox(self):
         try:
-            self.vcc.api.delete(f'/users/inbox', headers={'queue': self.queue})
-        except Exception as exc:
-            print('EXC', str(exc))
+            self.vcc.delete(f'/users/inbox', headers={'queue': self.queue})
+        except VCCError:
+            pass
 
     def ping_stations(self, network, period=10):
         self.ping.network(network, period)
 
     def run(self):
-        try:
-            self.check_inbox()
-            while not self.stopped.wait(self.period):
-                self.check_inbox()
-            self.delete_inbox()
-        except Exception as exc:
-            print('EXC', str(exc))
+        dt = self.check_inbox()
+        while not self.stopped.wait(self.interval if dt > self.interval else self.interval - dt):
+            dt = self.check_inbox()
+        self.delete_inbox()
 
     def stop(self):
         if self.ping:
@@ -96,54 +69,26 @@ class Ping(threading.Thread):
         super().__init__()
 
         self.stopped = threading.Event()
-        self.queue = queue
-        self.rmq_client = vcc.get_rmq_connection()
-        self.stations = []
-        self.delta = timedelta(seconds=1)
+        self.queue, self.vcc = queue, vcc
+        self.keys = []  # List of station keys
+        self.interval = 10
 
-    def network(self, stations, period):
-        self.stations = stations
-        self.delta = timedelta(seconds=period)
+    def network(self, stations, interval):
+        self.keys = [f'NS-{sta.upper()}' for sta in stations]
+        self.interval = interval
+
+    def send(self):
+        t0 = time.time()
+        try:
+            self.vcc.post(f'/messages/ping', headers={'queue': self.queue}, data={'keys': self.keys})
+        except VCCError:
+            pass
+        return time.time() - t0
 
     def run(self):
-        try:
-            while True:
-                t1 = datetime.utcnow()
-                for sta in self.stations:
-                    self.rmq_client.ping(f'NS-{sta.upper()}', reply_to=self.queue)
-                if self.stopped.wait((t1 + self.delta - datetime.utcnow()).total_seconds()):
-                    break
-        except RMQclientException:
-            pass
-
-    def stop(self):
-        self.stopped.set()
-
-
-class ApiPing(threading.Thread):
-
-    def __init__(self, queue, vcc):
-        super().__init__()
-
-        self.stopped = threading.Event()
-        self.queue = queue
-        self.vcc = vcc
-        self.stations = []
-        self.delta = timedelta(seconds=5)
-
-    def network(self, stations, period):
-        self.stations = [f'NS-{sta.upper()}' for sta in stations]
-        self.delta = timedelta(seconds=period)
-
-    def run(self):
-        try:
-            while True:
-                t1 = datetime.utcnow()
-                self.vcc.api.post(f'/messages/ping', headers={'queue': self.queue}, data={'keys': self.stations})
-                if self.stopped.wait((t1 + self.delta - datetime.utcnow()).total_seconds()):
-                    break
-        except RMQclientException:
-            pass
+        dt = self.send()
+        while not self.stopped.wait(self.interval - dt if dt < self.interval else self.interval):
+            dt = self.send()
 
     def stop(self):
         self.stopped.set()
@@ -288,10 +233,7 @@ class Dashboard(tk.Tk):
         self.timer = None  # Timer(self.utc, self.update_status)
         self.sefds = {}
         self.messages = queue.Queue()
-        if interval > 0:
-            self.inbox = Watcher(ses_id, self.vcc, self.messages, interval)
-        else:
-            self.inbox = Inbox(ses_id, self.vcc, self.messages)
+        self.inbox = InboxWatcher(ses_id, self.vcc, self.messages, interval)
         self.logs = {sta_id: StationLog(self, sta_id) for sta_id in self.session.network}
         self.scans = {}
         self.comm_status, self.ping_period = {}, 10
@@ -387,13 +329,12 @@ class Dashboard(tk.Tk):
     def check_comm_status(self, utc):
         for sta_id, t in self.comm_status.items():
             if not t or utc - t > self.lost_comm:
-                self.update_station_info(sta_id, '#5', "not connected to VCC")
-                self.stations.item(sta_id, tags=('problem',))
+                self.update_station_info(sta_id, '#5', "not connected to VCC", tags=('problem',))
                 if t:
                     self.logs.get(sta_id).add(utc, "not connected to VCC", status='problem')
                 self.comm_status[sta_id] = None
             else:
-                self.stations.item(sta_id, tags=('valid',))
+                self.update_station_info(sta_id, '#5', "", tags=('valid',))
 
 
     def update_status(self, utc):
@@ -418,27 +359,24 @@ class Dashboard(tk.Tk):
         self.status.configure(fg=color)
 
     def get_session(self, ses_id):
-        if rsp := self.vcc.api.get(f'/sessions/{ses_id}'):
+        if rsp := self.vcc.get(f'/sessions/{ses_id}'):
             return Session(json_decoder(rsp.json()))
         vcc_cmd('message-box', f'-t "Session {ses_id} not found" -m "" -i "warning"')
         sys.exit(1)
 
     def get_sefds(self, sta_id):
-        for n in range(3):
-            try:
-                rsp = self.vcc.api.get(f'/data/onoff/{sta_id}')
-                if rsp:
-                    data = json_decoder(rsp.json())
-                    self.sefds[sta_id] = SEFDViewer(self, data)
-                    self.stations.set(sta_id.capitalize(), '#3', f'{data["observed"]:%Y-%m-%d %H:%M}')
-                break
-            except VCCError:
-                pass
+        try:
+            if rsp := self.vcc.get(f'/data/onoff/{sta_id}'):
+                data = json_decoder(rsp.json())
+                self.sefds[sta_id] = SEFDViewer(self, data)
+                self.stations.set(sta_id.capitalize(), '#3', f'{data["observed"]:%Y-%m-%d %H:%M}')
+        except VCCError:
+            pass
 
-    def get_schedule(self):
+    def _get_schedule(self):
         for n in range(3):
             try:
-                if rsp := self.vcc.api.get(f'/schedules/{self.session.code.lower()}', params={'select': 'summary'}):
+                if rsp := self.vcc.get(f'/schedules/{self.session.code.lower()}', params={'select': 'summary'}):
                     self.session.update_schedule(json_decoder(rsp.json()))
                     self.schedule.set(self.session.sched_version)
                     self.scans = {info['station']: {'last': 0, 'total': info['nbr_scans'], 'version': info['version'],
@@ -453,13 +391,25 @@ class Dashboard(tk.Tk):
             except VCCError:
                 pass
 
+    def get_schedule(self):
+        try:
+            if rsp := self.vcc.get(f'/schedules/{self.session.code.lower()}', params={'select': 'summary'}):
+                self.session.update_schedule(json_decoder(rsp.json()))
+                self.schedule.set(self.session.sched_version)
+                self.scans = {info['station']: {'last': 0, 'total': info['nbr_scans'], 'version': info['version'],
+                                                'list': set()} for info in self.session.schedule.scheduled}
+                for sta_id, nbr in self.scans.items():
+                    self.update_station_info(sta_id, '#4', f'{nbr["last"]}/{nbr["total"]}')
+                    if nbr['version']:
+                        self.update_station_info(sta_id, '#2', f'V{nbr["version"]}')
+        except VCCError:
+            pass
+
     def done(self):
         try:
             self.inbox.stop()
             self.destroy()
         except Exception as exc:
-            print('Problem closing dashboard', str(exc))
-            print(traceback.format_exc())
             sys.exit()
 
     def update_clock(self):
@@ -471,9 +421,11 @@ class Dashboard(tk.Tk):
         waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
         self.after(int(waiting_time*1000), self.update_clock)
 
-    def update_station_info(self, sta_id, col, text):
+    def update_station_info(self, sta_id, col, text, tags=None):
         try:
             self.stations.set(sta_id, col, text)
+            if tags:
+                self.stations.item(sta_id, tags=tags)
         except TclError:
             pass
 
@@ -569,33 +521,3 @@ class Dashboard(tk.Tk):
         self.after(int(waiting_time*1000), self.update_clock)
         self.after(100, self.process_messages)
         self.mainloop()
-
-
-def test(value, stop):
-    waiting_time = 1.0 - datetime.utcnow().timestamp() % 1
-    while not stop.wait(waiting_time):
-        utc = datetime.utcnow()
-        value.set(f'{utc:%Y-%m-%d %H:%M:%S} UTC')
-        dt = datetime.utcnow().timestamp() % 1
-        waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
-
-
-def main():
-    import argparse
-
-    parser = argparse.ArgumentParser(description='Edit Station downtime')
-    parser.add_argument('-c', '--config', help='config file', required=False)
-    parser.add_argument('-i', '--interval', help='check inbox interval', type=int, required=False)
-    parser.add_argument('session', help='station code', nargs='?')
-
-    args = settings.init(parser.parse_args())
-
-    try:
-        Dashboard(args.session, args.interval).exec()
-    except VCCError as exc:
-        messagebox.showerror(f'{args.session.upper()} failed', str(exc))
-
-
-if __name__ == '__main__':
-
-    sys.exit(main())

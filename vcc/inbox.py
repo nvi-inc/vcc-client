@@ -4,22 +4,19 @@ import traceback
 from threading import Thread, Event
 import tempfile
 import logging
+import time
 
-import math
 import sys
 from datetime import datetime, timedelta
-import threading
-import queue
 from pathlib import Path
-from operator import itemgetter, attrgetter
-from collections import deque
+from operator import itemgetter
 
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox, TclError
+from tkinter import ttk, messagebox, TclError
 from tkinter import font
 
-from vcc import settings, VCCError, json_encoder, json_decoder, vcc_cmd, vcc_groups
-from vcc.client import VCC, RMQclientException
+from vcc import settings, VCCError, json_encoder, json_decoder, vcc_groups
+from vcc.client import VCC
 from vcc.session import Session
 from vcc.windows import MessageBox
 from vcc.xtools import Sessions
@@ -123,12 +120,8 @@ class MasterMsg(BaseMessage):
                 for ses_id, status in self._data.items():
                     logger.debug(f'request {ses_id}')
                     try:
-                        rsp = vcc.api.get(f'/sessions/{ses_id}')
-                        logger.debug(rsp.text)
-                        logger.debug(str(rsp.json()))
+                        rsp = vcc.get(f'/sessions/{ses_id}')
                         session = json_decoder(rsp.json())
-                        logger.debug('after json_decoder')
-                        #session = json_decoder(vcc.api.get(f'/sessions/{ses_id}').json())
                     except Exception as exc:
                         logger.debug(f'problem {str(exc)}')
                     logger.debug(f"got {session['code']}")
@@ -168,11 +161,11 @@ class DowntimeMsg(BaseMessage):
         if not self._sessions:
             with VCC(group_id) as vcc:
                 if not (sessions := self._data.get('sessions', [])):
-                    rsp = vcc.api.get(f"/sessions/next/{self._data['station']}",
-                                      params={'begin': self._start, 'end': self._end})
+                    rsp = vcc.get(f"/sessions/next/{self._data['station']}",
+                                  params={'begin': self._start, 'end': self._end})
                     sessions = rsp.json()
                 for ses_id in sessions:
-                    session = json_decoder(vcc.api.get(f'/sessions/{ses_id}').json())
+                    session = json_decoder(vcc.get(f'/sessions/{ses_id}').json())
                     session['status'] = (f"{self._sta_code} "
                                          f"{'down' if self._sta_code in session['removed'] else 'available'}")
                     self._sessions.append(session)
@@ -207,68 +200,13 @@ def make_msg_record(utc, code, status, data):
     return message_dict.get(code, BaseMessage)(utc, code, status, data)
 
 
-class Listener(Thread):
-
-    def __init__(self, group_id, update_fnc, status):
-        super().__init__()
-
-        self.stopped = Event()
-        self.group_id, self.rmq_client, self.update_fnc, self.status = group_id, None, update_fnc, status
-
-        self.status.set('Not connect to vcc')
-
-    def connect(self):
-        try:
-            self.vcc = VCC(self.group_id)
-            self.vcc.connect()
-            self.status.set('Connected to vcc')
-            self.rmq_client = self.vcc.get_rmq_client()
-        except VCCError:
-            self.rmq_client = None
-
-    def run(self):
-        try:
-            while not self.stopped.is_set():
-                try:
-                    self.connect()
-                    self.rmq_client.monit(self.process_message)
-                except (RMQclientException, Exception) as exc:
-                    print(str(exc))
-                    if self.stopped.is_set():
-                        break
-                    Event().wait(10)
-                    self.status.set('Try to reconnect to vcc')
-        except Exception as exc:
-            print('run', str(exc))
-            pass
-
-    def stop(self):
-        print('Stop monitoring')
-        self.stopped.set()
-        if self.rmq_client:
-            print('close rmq_client')
-            Event().wait(1)
-            self.rmq_client.close()
-        self.vcc.close()
-
-    def process_message(self, properties, data):
-        print('new message', properties, data)
-        self.rmq_client.acknowledge_msg()  # Always acknowledge message
-        try:
-            utc, code = datetime.fromisoformat(properties.headers['utc']), properties.headers['code']
-            status = 'urgent' if code == 'urgent' else 'unread'
-            self.update_fnc(make_msg_record(utc, code, status, json.loads(data)), new_msg=True)
-        except Exception as exc:
-            print('problem', str(exc))
-
-
 class Socket(Thread):
 
     def __init__(self, group_id, update_fnc, status):
         super().__init__()
 
         self.stopped = Event()
-        self.group_id, self.rmq_client, self.update_fnc, self.status = group_id, None, update_fnc, status
+        self.group_id, self.update_fnc, self.status = group_id, update_fnc, status
 
         self.server = Server('localhost', 0)
 
@@ -292,37 +230,44 @@ class Socket(Thread):
         self.update_fnc(make_msg_record(utc, code, status, info), new_msg=True)
 
 
-class Watcher(Thread):
+class InboxWatcher(Thread):
 
-    def __init__(self, group_id, update_fnc, status, period=30):
+    def __init__(self, group_id, update_fnc, status, period=5):
         super().__init__()
 
         self.stopped = Event()
-        self.group_id, self.rmq_client, self.update_fnc, self.status = group_id, None, update_fnc, status
+        self.group_id, self.update_fnc, self.status = group_id, update_fnc, status
         self.period = period
+        self.vcc = VCC(self.group_id)
+        self.vcc.connect()
 
         self.status.set('Not connect to vcc')
 
     def check_inbox(self):
+        t = time.time()
         try:
             self.status.set('Checking inbox')
-            with VCC(self.group_id) as vcc:
-                self.status.set(f'Updated at {datetime.utcnow():%H:%M:%S} UTC')
-                if rsp := vcc.api.get(f'/messages'):
-                    for headers, data in rsp.json():
-                        utc, code = datetime.fromisoformat(headers['utc']), headers['code']
-                        status = 'urgent' if code == 'urgent' else 'unread'
-                        self.update_fnc(make_msg_record(utc, code, status, json.loads(data)), new_msg=True)
-                else:
-                    self.status.set('Error connecting to vcc')
+            self.status.set(f'Updated at {datetime.utcnow():%H:%M:%S} UTC')
+            if rsp := self.vcc.get(f'/messages'):
+                for headers, data in rsp.json():
+                    utc, code = datetime.fromisoformat(headers['utc']), headers['code']
+                    status = 'urgent' if code == 'urgent' else 'unread'
+                    self.update_fnc(make_msg_record(utc, code, status, json.loads(data)), new_msg=True)
+            else:
+                self.status.set('Error connecting to vcc')
         except Exception as exc:
             print('EXC', str(exc))
+            try:
+                self.vcc.connect()
+            except VCCError:
+                Event().wait(timeout=1)
+        return time.time() - t
 
     def run(self):
         try:
-            self.check_inbox()
-            while not self.stopped.wait(self.period):
-                self.check_inbox()
+            dt = self.check_inbox()
+            while not self.stopped.wait(self.period - min(self.period, dt)):
+                dt = self.check_inbox()
         except Exception as exc:
             print('EXC', str(exc))
 
@@ -453,10 +398,16 @@ class InboxWnd(tk.Tk):
 
     def __init__(self, group_id, interval=0, display=None):
         try:
+            fh = logging.FileHandler(f'/tmp/inbox-{display}.log')
+            fh.setLevel(logging.DEBUG)
+            logger.addHandler(fh)
+            if not os.environ.get('XAUTHORITY'):
+                os.environ['XAUTHORITY'] = os.path.expanduser('~/.Xauthority')
+            logger.debug(f"X11 {os.environ.get('XAUTHORITY', 'None')}")
             super().__init__(screenName=display)
-        except TclError as exc:
+        except (TclError, Exception) as exc:
             print(f'Inbox fatal error - {str(exc)}')
-            sys.exit(1)
+            sys.exit(0)
         if not settings.check_privilege(group_id):
             messagebox.showerror(self, f'No signature for {group_id}.')
             sys.exit(1)
@@ -471,9 +422,6 @@ class InboxWnd(tk.Tk):
         self.listener = None
         self.display = display
 
-        fh = logging.FileHandler('/tmp/vcc-debug.log')
-        fh.setLevel(logging.DEBUG)
-        logger.addHandler(fh)
 
     def init_wnd(self):
         # Set the size of the tkinter window
@@ -496,10 +444,8 @@ class InboxWnd(tk.Tk):
             self.listener = Socket(self.group_id, self.messages.add_item, self.connection_status)
             self.messages.set_status_window(self.connection_status.set)
             #port = self.listener.server.socket.getsockname()
-        elif self.interval:
-            self.listener = Watcher(self.group_id, self.messages.add_item, self.connection_status, self.interval)
         else:
-            self.listener = Listener(self.group_id, self.messages.add_item, self.connection_status)
+            self.listener = InboxWatcher(self.group_id, self.messages.add_item, self.connection_status, self.interval)
 
     def init_list(self, main_frame):
         #frame = tk.Frame(main_frame, height=height, width=width+20)
@@ -617,7 +563,7 @@ def main():
     try:
         InboxWnd('NS', display=args.display).exec()
     except Exception as exc:
-        print(str(exc), traceback.format_exc())
+        pass
 
 
 if __name__ == '__main__':

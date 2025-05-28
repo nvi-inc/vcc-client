@@ -10,10 +10,10 @@ logger = logging.getLogger('vcc')
 
 
 # Send ONOFF records to VCC
-def post_onoff(api, records):
+def post_onoff(vcc, records):
     if records:
         try:
-            if rsp := api.post('/data/onoff', data=records):
+            if vcc and (rsp := vcc.post('/data/onoff', data=records)):
                 logger.info(f'uploaded {len(records)} onoff records for {records[0]["source"]}')
             else:
                 raise VCCError(rsp.text)
@@ -42,6 +42,6 @@ def onoff(filepath):
                 records.append(dict(**{'time': timestamp}, **record))
             elif found := is_header(line):
                 header = ['source'] + found['data'].split()
-                records = post_onoff(vcc.api, records)  # Send existing onoff records to VCC
+                records = post_onoff(vcc, records)  # Send existing onoff records to VCC
 
-        post_onoff(vcc.api, records)
+        post_onoff(vcc, records)

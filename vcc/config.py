@@ -64,8 +64,7 @@ class ConfigDecoder:
                             print('Configuration terminated.')
                             return
                         break
-                key_words = ['protocol:https', 'tunnel:']
-                comment = key_words[1] if option == '1' else key_words[0]
+                comment = 'tunnel:' if option == '1' else 'protocol:https'
                 for index, line in enumerate(lines := decoded.splitlines()):
                     if comment in line:
                         lines[index] = f'# {line}'

@@ -31,15 +31,15 @@ def update_network(lines):
     try:
         with VCC('CC') as vcc:
             old = {data['code']: data for data in rsp.json() if data.pop('updated')} \
-                if (rsp := vcc.api.get('/stations')) else {}
+                if (rsp := vcc.get('/stations')) else {}
             if network == old:
                 raise VCCError('No changes in network stations')
             if added := {code: value for (code, value) in network.items() if old.get(code) != value}:
-                if not (rsp := vcc.api.post('/stations', data=added)):
+                if not (rsp := vcc.post('/stations', data=added)):
                     raise VCCError(rsp.text)
                 print("\n".join([f'{i:4d} {sta} {status}' for i, (sta, status) in enumerate(rsp.json().items(), 1)]))
             for index, sta_id in enumerate([code for code in old if code not in network], 1):
-                if not (rsp := vcc.api.delete(f'/stations/{sta_id}')):
+                if not (rsp := vcc.delete(f'/stations/{sta_id}')):
                     raise VCCError(rsp.text)
                 print(f'{index:4d} {sta_id} {rsp.json()[sta_id]}')
     except VCCError as exc:
@@ -69,7 +69,7 @@ def update_codes(lines):
         try:
             with VCC('CC') as vcc:
                 for key, name in codes.items():
-                    rsp = vcc.api.post(f'/catalog/{name}', data=data[key])
+                    rsp = vcc.post(f'/catalog/{name}', data=data[key])
                     if not rsp:
                         raise VCCError(rsp.text)
                     print(f'{len([code for code, status in rsp.json().items() if status == "updated"])} '
@@ -113,7 +113,7 @@ def update_master(lines, filter_old=True):
     # Post data to VCC
     try:
         with VCC('CC') as vcc:
-            if rsp := vcc.api.post('/sessions', data=sessions, params={'notify': filter_old}):
+            if rsp := vcc.post('/sessions', data=sessions, params={'notify': filter_old}):
                 for ses_id, status in rsp.json().items():
                     print(ses_id, status)
             elif ans := rsp.json():
@@ -274,7 +274,7 @@ class SessionViewer:
 
     def get_session(self, ses_id):
         try:
-            rsp = self.vcc.api.get(f'/sessions/{ses_id}')
+            rsp = self.vcc.get(f'/sessions/{ses_id}')
             if rsp:
                 return Session(json_decoder(rsp.json()))
         except VCCError:
@@ -283,7 +283,7 @@ class SessionViewer:
 
     def get_options(self, url):
         try:
-            rsp = self.vcc.api.get(url)
+            rsp = self.vcc.get(url)
             if rsp:
                 return [item['code'].strip() for item in json_decoder(rsp.json())]
         except VCCError:
@@ -292,7 +292,7 @@ class SessionViewer:
 
     def get_stations(self):
         try:
-            rsp = self.vcc.api.get('/stations')
+            rsp = self.vcc.get('/stations')
             if rsp:
                 return [item['code'].strip() for item in json_decoder(rsp.json())]
         except VCCError:
@@ -367,7 +367,7 @@ class SessionViewer:
             data = {code: getattr(self.session, code) for code in COLUMNS if hasattr(self.session, code)}
             data = dict(**data, **{'start': self.session.start, 'master': self.session.master,
                                    'stations': self.network.get_text()})
-            rsp = self.vcc.api.put(f'/sessions/{self.session.code}', data=data)
+            rsp = self.vcc.put(f'/sessions/{self.session.code}', data=data)
             if not rsp:
                 raise VCCError(f'VCC response {rsp.status_code}\n{rsp.text}')
             status = json_decoder(rsp.json())[self.session.code]
@@ -384,8 +384,8 @@ class SessionViewer:
 def delete_session(ses_id):
     try:
         with VCC('CC') as vcc:
-            if rsp := vcc.api.get(f'/sessions/{ses_id.lower()}'):
-                rsp = vcc.api.delete(f'/sessions/{ses_id.lower()}')
+            if rsp := vcc.get(f'/sessions/{ses_id.lower()}'):
+                rsp = vcc.delete(f'/sessions/{ses_id.lower()}')
             try:
                 for key, info in rsp.json().items():
                     print(f'{key}: {info}')

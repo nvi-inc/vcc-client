@@ -2,11 +2,12 @@ import json
 import re
 import traceback
 import logging
+import time
 
 from collections import namedtuple
 from threading import Thread, Event
 
-from vcc.client import RMQclientException
+from vcc.client import VCC, VCCError
 from vcc.ns.processes import ProcessMaster, ProcessSchedule, ProcessLog, ProcessMsg, ProcessUrgent
 
 Addr = namedtuple('addr', 'ip port')
@@ -15,61 +16,42 @@ logger = logging.getLogger('vcc')
 
 process = dict(master=ProcessMaster, schedule=ProcessSchedule, log=ProcessLog, msg=ProcessMsg, urgent=ProcessUrgent)
 
+
 class InboxMonitor(Thread):
 
     extract_name = re.compile('.*filename=\"(?P<name>.*)\".*').match
 
-    def __init__(self, sta_id, vcc, comm_flag):
+    def __init__(self, sta_id, vcc, interval=5):
         super().__init__()
 
-        self.sta_id, self.vcc, self.comm_flag = sta_id, vcc, comm_flag
-        try:
-            self.rmq_client = self.vcc.get_rmq_client()
-        except:
-            self.rmq_client = None
-            self.comm_flag.set()
+        self.sta_id, self.vcc, self.interval = sta_id, vcc, interval
         self.stopped = Event()
 
-    def run(self):
-        logger.info('inbox started')
+    def check_inbox(self):
+        t = time.time()
         try:
-            while True:
-                try:
-                    self.rmq_client.monit(self.process_message)
-                except RMQclientException as exc:
-                    logger.debug(f'inbox communication reset - {self.stopped.is_set()}')
-                    if self.stopped.is_set():
-                        break
-                    Event().wait(10)
-                    try:
-                        self.rmq_client = self.vcc.get_rmq_client()
-                        logger.info('inbox communication reset')
-                    except:
-                        self.comm_flag.set()
-                        break
-                except Exception as exc:
-                    logger.debug(f'inbox problem {str(exc)}')
-                    Event().wait(10)
-        except Exception as exc:
-            logger.debug(f'big problem {str(exc)}')
+            if rsp := self.vcc.get(f'/messages'):
+                for headers, data in rsp.json():
+                    self.process_message(headers, data)
+        except VCCError:
+            pass
+        return time.time() - t
 
-        logger.info('inbox stopped')
+    def run(self):
+        dt = self.check_inbox()
+        while not self.stopped.wait(self.interval if dt > self.interval else self.interval - dt):
+            dt = self.check_inbox()
 
     def stop(self):
         logger.debug(f'inbox stop requested')
         self.stopped.set()
-        Event().wait(1)
-        self.rmq_client.close()
 
-    def process_message(self, properties, data):
-        headers = properties.headers
-        # Ping sent by dashboard
+    def process_message(self, headers, data):
         code = headers['code']
-        logger.debug(f'{headers} {data}')
+        logger.debug(f'process_message{headers} {data}')
         if code == 'ping':
-            self.rmq_client.pong(self.sta_id, properties.reply_to, 'Ok')
-        else:
-            # Decode message
+            self.pong(headers['sender'], status='Ok')
+        else:  # Decode message
             try:
                 data = json.loads(data) if headers.get('format', 'text') == 'json' else {}
                 text = ', '.join([f'{key}={val}' for key, val in data.items()]) if isinstance(data, dict) else str(data)
@@ -81,13 +63,9 @@ class InboxMonitor(Thread):
                 for index, line in enumerate(traceback.format_exc().splitlines(), 1):
                     logger.warning(f'message invalid - {index:2d} {line.strip()}')
 
-        # Always acknowledge message
-        self.rmq_client.acknowledge_msg()
+    def pong(self, sender, status='Ok'):
 
-    def get_messages(self):
         try:
-            self.rmq_client.get(self.process_message)
-        except RMQclientException as exc:
-            logger.debug(f'Problem retrieving messages {str(exc)}')
-
-
+            rsp = self.vcc.post(f'/messages/pong', data={'key': sender, 'status': status})
+        except VCCError as err:
+            logger.warning(f"pong {str(err)}")

@@ -2,6 +2,7 @@ import re
 import json
 import psutil
 import logging
+from pathlib import Path
 
 from psutil import process_iter, AccessDenied, NoSuchProcess
 
@@ -20,9 +21,12 @@ def get_displays(display=None):
     displays = []
     for prc in psutil.process_iter():
         try:
+            logger.warning(f"DISPLAY {prc.pid} {prc.name()} {prc.username()} {prc.environ().get('DISPLAY', None)}")
             displays.append(prc.environ().get('DISPLAY', None))
         except:
             pass
+
+    logger.warning(f"DISPLAYS {list(filter(None, list(set(displays))))}")
 
     return list(filter(None, list(set(displays))))
 
@@ -33,7 +37,10 @@ def notify(title, message, icon='info', display=None):
     # Use vcc_cmd to start a new thread for all 'oper' displays
     for display in get_displays(display):
         options = f"-t '{title}' -m '{message}' -i '{icon}' -D '{display}'"
-        vcc_cmd('message-box', options, user='oper', group='rtx')
+        try:
+            vcc_cmd('message-box', options, user='oper', group='rtx')
+        except Exception as exc:
+            logger.warning(f"{str(exc)}")
 
 
 # Notify oper using vcc message_box. Pop message box to all displays or the user display
@@ -52,8 +59,9 @@ def get_ddout_log():
     for proc in process_iter(['name', 'pid']):
         if proc.info['name'] == 'ddout':
             try:
-                files = [file.path for file in proc.open_files() if file.path.startswith('/usr2/log')]
-                return files[0] if files else None
+                for file in proc.open_files():
+                    if file.path.startswith('/usr2/log'):
+                        return Path(file.path)
             except (NoSuchProcess, AccessDenied):
                 return None
     return None

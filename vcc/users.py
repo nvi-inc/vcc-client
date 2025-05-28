@@ -1,18 +1,5 @@
-from vcc import settings, signature, VCCError, vcc_groups
-from vcc.client import VCC, RMQclientException
-
-
-# Test that inbox is available
-def test_inbox(vcc, group_id, session=None):
-    print(f'Inbox', end=' ')
-    if group_id == 'DB' and not session:
-        print('not tested!')
-        return
-    try:
-        msg = vcc.get_rmq_client(session)
-        print(f'is available! Response time is {msg.alive():.3f} seconds')
-    except (VCCError, RMQclientException) as exc:
-        print(f'NOT available! [{str(exc)}]')
+from vcc import settings, VCCError, vcc_groups
+from vcc.client import VCC
 
 
 # Test if users in configuration file are valid
@@ -22,12 +9,12 @@ def test_users():
             print(f'{name} {code}', end=' ')
             try:
                 with VCC(group_id) as vcc:
-                    if not (rsp := vcc.api.get('/users/valid')):  # , headers=signature.make(group_id))
+                    if not (rsp := vcc.get('/users/valid')):  # , headers=signature.make(group_id))
                         raise VCCError(f'has invalid response {rsp.text}')
-                    print('is valid!', end=' ')
-                    test_inbox(vcc, group_id, 'db_test' if group_id == 'DB' else None)
+                    print(f"is valid! Inbox has {rsp.json().get('messages_ready', 0)} messages", end=' ')
             except VCCError as exc:
                 print(f'test fails! [{str(exc)}]')
+            print()
 
 
 def main():

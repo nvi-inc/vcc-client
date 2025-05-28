@@ -26,9 +26,12 @@ logger = logging.getLogger('vcc')
 
 def send_msg(header, data):
     for display in get_displays():
-        if (port := get_port(display)) or (port := start_inbox(display)):
-            client = Client('127.0.0.1', port)
-            client.send(json.dumps((header, data), default=json_encoder).encode("utf-8"))
+        try:
+            if (port := get_port(display)) or (port := start_inbox(display)):
+                client = Client('127.0.0.1', port)
+                client.send(json.dumps((header, data), default=json_encoder).encode("utf-8"))
+        except Exception as exc:
+            logger.warning(f'send msg {str(exc)}')
     # Save msg in hidden directory
     path = Path(os.environ.get('VCC_HIDDEN', '/tmp'), 'vcc-msg-ns.json')
     path.touch(exist_ok=True)
@@ -62,6 +65,7 @@ def start_inbox(display):
             return port
         Event().wait(1)
     return None
+
 
 class ProcessMaster(Thread):
     # overriding constructor
@@ -121,7 +125,7 @@ class ProcessSchedule(Thread):
             self.data['processed'] = 'Schedule not downloaded: configuration set to NO'
             return send_msg(self.headers, self.data)
         # Request file from VCC
-        if not (rsp := self.vcc.api.get(f'/schedules/{self.ses_id}')):
+        if not (rsp := self.vcc.get(f'/schedules/{self.ses_id}')):
             self.data['processed'] = f'Problem downloading schedule for\n\n {rsp.text}'
             return send_msg(self.headers, self.data)
         # Save schedule in Schedules folder

@@ -1,31 +1,23 @@
 from datetime import datetime, timedelta
-import json
-from subprocess import Popen
 
 from vcc import settings, json_decoder
 from vcc.client import VCC
 from vcc.session import Session
-from vcc.utils import show_session, show_next, upload_schedule_files
 
 masters = ['all', 'std', 'int']
-
-
-def show_version():
-    import pkg_resources  # part of setuptools
-    print('vcc version', pkg_resources.require("vcc")[0].version)
 
 
 def summary(sta_id, begin, end):
     with VCC() as vcc:
         end = end if end else datetime.utcnow().date()
-        rsp = vcc.api.get('/sessions', params={'begin': begin, 'end': end, 'master': 'all'})
-        sessions = [Session(vcc.api.get(f'/sessions/{ses_id}').json()) for ses_id in rsp.json()]
+        rsp = vcc.get('/sessions', params={'begin': begin, 'end': end, 'master': 'all'})
+        sessions = [Session(vcc.get(f'/sessions/{ses_id}').json()) for ses_id in rsp.json()]
 
         sta_id = sta_id.capitalize()
         for session in sessions:
             if sta_id in session.included:
                 print(f'{session.code.lower()}', end=' ')
-                rsp = vcc.api.get(f'/schedules/{session.code.lower()}', params={'select': 'summary'})
+                rsp = vcc.get(f'/schedules/{session.code.lower()}', params={'select': 'summary'})
                 if rsp:
                     scans = {info['station']: info['nbr_scans'] for info in json_decoder(rsp.json())['scheduled']}
                     print(scans.get(sta_id, 'N/A'))

@@ -215,12 +215,12 @@ class Downtime(tk.Tk):
             self.vcc.close()
 
     def get_information(self):
-        if not (rsp := self.vcc.api.get(f'/stations/{self.sta_id}')):
+        if not (rsp := self.vcc.get(f'/stations/{self.sta_id}')):
             raise VCCError(f'{self.sta_id.capitalize()} does not exist!')
         self.station = json_decoder(rsp.json())
 
-        self.reasons = json_decoder(self.vcc.api.get(f'/downtime/').json())
-        rsp = self.vcc.api.get(f'/downtime/{self.sta_id}')
+        self.reasons = json_decoder(self.vcc.get(f'/downtime/').json())
+        rsp = self.vcc.get(f'/downtime/{self.sta_id}')
         records = json_decoder(rsp.json()) if rsp else []
         today = datetime.utcnow().date()
         self.records = [rec for rec in records if not rec['end'] or rec['end'].date() >= today]
@@ -288,7 +288,7 @@ class Downtime(tk.Tk):
     def update_vcc_record(self, record):
         if not self.vcc.is_available:
             self.vcc.connect()
-        ans = self.vcc.api.put(f'/downtime/{self.sta_id}', data=record).json()
+        ans = self.vcc.put(f'/downtime/{self.sta_id}', data=record).json()
         if 'update' not in ans:
             raise VCCError(ans.get('error', 'unknown error'))
         return ans['update']
@@ -300,7 +300,7 @@ class Downtime(tk.Tk):
         last = last if last else first + timedelta(days=14)
         end = record['end'] if record['end'] else record['start'] + timedelta(days=14)
         first, last = min(first, record['start']), max(last, end)
-        rsp = self.vcc.api.get(f'/sessions/next/{self.sta_id}', params={'begin': first, 'end': last})
+        rsp = self.vcc.get(f'/sessions/next/{self.sta_id}', params={'begin': first, 'end': last})
         sessions = [data for data in rsp.json()]
         end = sdate(record['end'], 'unknown')
         title = f"{self.sta_id.capitalize()} down {sdate(record['start'])} to {end}. List of affected sessions"
@@ -312,10 +312,10 @@ def report(sta_id):
         print('You need station code as input parameter')
     else:
         with VCC() as vcc:
-            if not (rsp := vcc.api.get(f'/stations/{sta_id}')):
+            if not (rsp := vcc.get(f'/stations/{sta_id}')):
                 print(f'Station {sta_id.capitalize()} does not exist')
             else:
-                rsp = vcc.api.get(f'/downtime/{sta_id}')
+                rsp = vcc.get(f'/downtime/{sta_id}')
                 records = json_decoder(rsp.json()) if rsp else []
                 today = datetime.utcnow().date()
                 if not (records := [rec for rec in records if not rec['end'] or rec['end'].date() >= today]):

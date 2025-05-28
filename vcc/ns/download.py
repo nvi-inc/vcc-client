@@ -18,7 +18,7 @@ def download(file_type, session, station):
 
 def get_sched(vcc, session, file_type):
     problem = f'Problem downloading {file_type} file for {session}'
-    if not (rsp := vcc.api.get(f'/schedules/{session}', params={'select': file_type})):
+    if not (rsp := vcc.get(f'/schedules/{session}', params={'select': file_type})):
         try:
             return rsp.json().get('error', problem)
         except:

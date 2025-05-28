@@ -91,15 +91,14 @@ class DestWnd(ttk.LabelFrame):
         groups = {}
         try:
             with VCC() as vcc:
-                api = vcc.get_api()
-                groups['CC'] = [center['code'] for center in api.get('/catalog/coordinating').json()]
-                groups['OC'] = [center['code'] for center in api.get('/catalog/operations').json()]
-                groups['CO'] = [center['code'] for center in api.get('/catalog/correlator').json()]
-                groups['AC'] = [center['code'] for center in api.get('/catalog/analysis').json()]
-                groups['NS'] = [sta['code'] for sta in api.get('/stations').json()]
+                groups['CC'] = [center['code'] for center in vcc.get('/catalog/coordinating').json()]
+                groups['OC'] = [center['code'] for center in vcc.get('/catalog/operations').json()]
+                groups['CO'] = [center['code'] for center in vcc.get('/catalog/correlator').json()]
+                groups['AC'] = [center['code'] for center in vcc.get('/catalog/analysis').json()]
+                groups['NS'] = [sta['code'] for sta in vcc.get('/stations').json()]
 
                 begin, end = date(1979, 1, 1), date(2100, 1, 1)
-                sessions = sorted(api.get('/sessions', params={'begin': begin, 'end': end}).json())
+                sessions = sorted(vcc.get('/sessions', params={'begin': begin, 'end': end}).json())
                 return groups, sessions
         except VCCError as err:
             messagebox.showerror('VCC problem', f'{str(err)}')
@@ -196,7 +195,7 @@ class VCCMessage(tk.Tk):
         try:
             data = {'message': msg, 'targets': targets}
             with VCC(self.from_wnd.get()) as vcc:
-                rsp = vcc.get_api().post('/messages/urgent', data=data)
+                rsp = vcc.post('/messages/urgent', data=data)
                 messagebox.showinfo('Message sent', rsp.json().capitalize() if rsp else rsp.text)
         except VCCError as exc:
             messagebox.showerror('Problem sending message', f'Failed uploading urgent message [{str(exc)}]')

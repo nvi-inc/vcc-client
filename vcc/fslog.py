@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 import re
 import bz2
-from datetime import datetime
 
 from vcc import settings, message_box
 from vcc.client import VCC, VCCError
@@ -57,14 +56,14 @@ def upload(vcc, sta_id, ses_id, full=True, reduce=True, quiet=False):
         file = BZ2log(path) if full else SHORTlog(path, reduce)
         progress = ProgressDots(f'Uploading {file.name} ', delay=5)
         try:
-            if not vcc.api.get(f'/sessions/{ses_id}'):
+            if not vcc.get(f'/sessions/{ses_id}'):
                 if not quiet:
                     print(f'{ses_id} not an IVS session')
                 return
             params = {'send_msg': True}
             if not quiet:
                 progress.start()
-            if rsp := vcc.api.post('/logs', files=[('file', (file.name, file, file.format))], params=params):
+            if rsp := vcc.post('/logs', files=[('file', (file.name, file, file.format))], params=params):
                 status = rsp.json()
                 msg = f" done in {status['time']:.3f} seconds!"
             else:
@@ -100,9 +99,9 @@ def download_log(vcc, filename):
     waiting = ProgressDots(f'Downloading {filename} ', delay=0.5)
     waiting.start()
     success = 'failed!'
-    if not (rsp := vcc.api.get(f'/sessions/{ses_id}')) or not (session := Session(rsp.json())):
+    if not (rsp := vcc.get(f'/sessions/{ses_id}')) or not (session := Session(rsp.json())):
         message_box(f'Get file {filename}', f"Session {ses_id} does not exist!", 'warning')
-    elif not (rsp := vcc.api.get(f'/logs/{ses_id}/{sta_id}')):
+    elif not (rsp := vcc.get(f'/logs/{ses_id}/{sta_id}')):
         message_box(f'Get file {filename}', f"{filename} failed!\n{rsp.json().get('error', rsp.text)}", 'warning')
     elif not (found := re.match(r'.*filename=\"(?P<name>.*)\".*', rsp.headers['content-disposition'])):
         message_box(f"Download problem", f"Problem downloading {filename}\n{rsp.headers['content-disposition']}",

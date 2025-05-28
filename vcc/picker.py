@@ -1,4 +1,3 @@
-import json
 import sys
 from datetime import datetime, timedelta
 from threading import Thread, Event
@@ -34,14 +33,14 @@ class Sessions(Thread):
         # Get session information from VLBI web service (vws)
         try:
             vcc = VCC()
-            rsp = vcc.api.get('/sessions', params={'begin': self.begin, 'end': self.end, 'master': self.master})
+            rsp = vcc.get('/sessions', params={'begin': self.begin, 'end': self.end, 'master': self.master})
             if rsp:
                 self.codes = rsp.json()
                 for ses_id in self.codes:
-                    rsp = vcc.api.get(f'/sessions/{ses_id}')
+                    rsp = vcc.get(f'/sessions/{ses_id}')
                     if rsp:
                         session = Session(rsp.json())
-                        rsp = vcc.api.get(f'/schedules/{ses_id}', params={'select': 'summary'})
+                        rsp = vcc.get(f'/schedules/{ses_id}', params={'select': 'summary'})
                         if rsp:
                             session.update_schedule(rsp.json())
                         yield session
@@ -51,7 +50,7 @@ class Sessions(Thread):
 
 class SessionPicker:
     def __init__(self, master):
-        self.station = self.api = self.reasons = self.records = None
+        self.station = self.reasons = self.records = None
         self.title = f'Session picker'
         self.root = self.tree = self.reason = self.start = self.end = self.comment = self.update = None
         today = datetime.utcnow().date()
@@ -211,13 +210,13 @@ class SessionPicker:
         # Get session information from VLBI web service (vws)
         try:
             vcc = VCC()
-            rsp = vcc.api.get('/sessions', params={'begin': self.begin, 'end': self.end, 'master': 'all'})
+            rsp = vcc.get('/sessions', params={'begin': self.begin, 'end': self.end, 'master': 'all'})
             if rsp:
                 for ses_id in rsp.json():
-                    rsp = vcc.api.get(f'/sessions/{ses_id}')
+                    rsp = vcc.get(f'/sessions/{ses_id}')
                     if rsp:
                         session = Session(rsp.json())
-                        rsp = vcc.api.get(f'/schedules/{ses_id}', params={'select': 'summary'})
+                        rsp = vcc.get(f'/schedules/{ses_id}', params={'select': 'summary'})
                         if rsp:
                             session.update_schedule(rsp.json())
                         yield session

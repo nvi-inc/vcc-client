@@ -2,14 +2,14 @@ import json
 import sys
 import tkinter
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from tkinter import *
 from tkinter import ttk
 
 from vcc import settings, json_decoder, vcc_cmd
 from vcc.client import VCC
-from vcc.utils import master_types, get_next_sessions
+from vcc.utils import master_types
 
 
 class Sessions:
@@ -88,7 +88,7 @@ def upcoming_sessions(ses_type, code, args):
         if not session_list:
             return
         now = datetime.utcnow()
-        sessions = [json_decoder(rsp.json()) for code in session_list if (rsp := vcc.api.get(f'/sessions/{code}'))]
+        sessions = [json_decoder(rsp.json()) for code in session_list if (rsp := vcc.get(f'/sessions/{code}'))]
         data = [ses for ses in sessions if ses['start'] > now and ses['master'] in master]
 
         type_str = master_types.get(ses_type, '')
@@ -116,7 +116,7 @@ def main():
     data = []
     with VCC() as vcc, open('/tmp/vcc-wnd.txt', 'w') as f:
         for (code, status) in json_decoder(json.loads(args.message)):
-            if rsp := vcc.api.get(f'/sessions/{code}'):
+            if rsp := vcc.get(f'/sessions/{code}'):
                 data.append(dict(**json_decoder(rsp.json()), **{'status': status}))
 
     try:
@@ -128,19 +128,3 @@ def main():
 if __name__ == '__main__':
 
     sys.exit(main())
-
-
-"""
-    with VCC() as vcc, open('/tmp/vcc-wnd.txt', 'w') as f:
-        data = []
-        for (ses_id, status) in json_decoder(json.loads(args.message)):
-       for ses_id, status in self.data.items():
-            if rsp := self.vcc.api.get(f'/sessions/{ses_id}'):
-                sessions.append(dict(**rsp.json(), **{'status': status}))
-                # sessions.append((ses_id, status))
-            if status:
-                session['status'] = status
-            data.append(session)
-            print(ses_id, session, file=f)
-
-"""

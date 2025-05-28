@@ -19,7 +19,7 @@ from vcc.tools import upcoming_sessions
 # Output session information
 def show_session(ses_id):
     with VCC() as vcc:
-        if rsp := vcc.api.get(f'/sessions/{ses_id}'):
+        if rsp := vcc.get(f'/sessions/{ses_id}'):
             print(Session(rsp.json()))
         else:
             print(f'Could not find information on {ses_id}')
@@ -84,10 +84,10 @@ def main():
     sub.add_argument('param', help='master file or session to modify')
     # DASHBOARD subprocess
     sub = subparsers.add_parser('dashboard', help='Use dashboard to monitor session')
-    sub.add_argument('-i', '--interval', help='reading interval', type=int, default=0)
+    sub.add_argument('-i', '--interval', help='reading interval', type=int, default=5)
     sub.add_argument('session', help='session code')
     # DOWNTIME subprocess
-    sub = subparsers.add_parser('downtime', help='Use dashboard to monitor session')
+    sub = subparsers.add_parser('downtime', help='Report downtime of antenna')
     sub.add_argument('-r', '--report', help='output data in csv format', action='store_true')
     sub.add_argument('station', help='station code', nargs='?')
     # SUMOPS subprocess

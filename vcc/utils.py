@@ -68,28 +68,28 @@ def fetch_files(name):
         # Request schedule files (skd, vex and text)
         if not (suffix := path.suffix[1:]):
             ses_id, subdir = name.lower(), 'schedule'
-            if not (rsp := vcc.api.get(f'/sessions/{ses_id}')):
+            if not (rsp := vcc.get(f'/sessions/{ses_id}')):
                 messagebox.showerror(ses_id.upper(), f'{ses_id} is not an IVS session')
                 return
             session = Session(rsp.json())
-            if not (rsp := vcc.api.get(f'/schedules/{ses_id}')):
+            if not (rsp := vcc.get(f'/schedules/{ses_id}')):
                 messagebox.showerror('Get schedule', f'No schedule for files for {ses_id}')
                 return
             if not (file := save_file(rsp, f'schedule for {ses_id}')):
                 return
             print(f'{file.name} downloaded')
             # If skd was downloaded, look for vex file
-            if file.suffix == '.skd' and (rsp := vcc.api.get(f'/schedules/{ses_id}', params={'select': 'vex'})):
+            if file.suffix == '.skd' and (rsp := vcc.get(f'/schedules/{ses_id}', params={'select': 'vex'})):
                 if file := save_file(rsp, f'{ses_id}.vex'):
                     print(f'{file.name} downloaded')
             # Download text file
-            if rsp := vcc.api.get(f'/schedules/{ses_id}', params={'select': 'txt'}):
+            if rsp := vcc.get(f'/schedules/{ses_id}', params={'select': 'txt'}):
                 if file := save_file(rsp, f'{ses_id}.txt'):
                     print(f'{file.name} downloaded')
             # Download prc file if user is stations
             subdir = 'proc'
             if sta_id := getattr(settings.Signatures, 'NS', [''])[0].lower():
-                if rsp := vcc.api.get(f'/schedules/{ses_id}', params={'select': f'{sta_id}|prc'}):
+                if rsp := vcc.get(f'/schedules/{ses_id}', params={'select': f'{sta_id}|prc'}):
                     if file := save_file(rsp, f'{ses_id}{sta_id}.prc'):
                         print(f'{file.name} downloaded')
 
@@ -97,12 +97,12 @@ def fetch_files(name):
             stem = Path(name.lower()).stem
             subdir = 'proc' if suffix == 'prc' else 'schedule'
             ses_id, select = (stem[:-2], f"{stem[-2:]}|{suffix}") if suffix == 'prc' else (stem, suffix)
-            if not (rsp := vcc.api.get(f'/sessions/{ses_id}')):
+            if not (rsp := vcc.get(f'/sessions/{ses_id}')):
                 messagebox.showerror(ses_id.upper(), f'{ses_id} is not an IVS session')
                 return
             session = Session(rsp.json())
             # Download session file
-            if not (rsp := vcc.api.get(f'/schedules/{ses_id}', params={'select': select})):
+            if not (rsp := vcc.get(f'/schedules/{ses_id}', params={'select': select})):
                 messagebox.showerror(f'Get file {name}', f"{name} failed!\n{rsp.json().get('error', rsp.text)}")
             elif file := save_file(rsp, name):
                 print(f'{file.name} downloaded')
@@ -119,9 +119,8 @@ def upload_schedule_files(path_list, notify=True):
         return
     try:
         with VCC('OC') as vcc:
-            api = vcc.get_api()
             files = [('files', (os.path.basename(path), open(path, 'rb'), 'text/plain')) for path in path_list]
-            rsp = api.post('/schedules', files=files, params={'notify': notify})
+            rsp = vcc.post('/schedules', files=files, params={'notify': notify})
             if not rsp:
                 raise VCCError(f'{rsp.status_code}: {rsp.text}')
             message = '<br>'.join([f"{os.path.basename(file)} {result}" for file, result in rsp.json().items()])
@@ -136,7 +135,7 @@ def show_session(code):
     try:
         with VCC() as vcc:
             # Check if this is a session code
-            if rsp := vcc.get_api().get(f'/sessions/{code}'):
+            if rsp := vcc.get(f'/sessions/{code}'):
                 print_session(json_decoder(rsp.json()))
             else:
                 print(f'Failed to get information for {code}!')
@@ -148,7 +147,7 @@ def show_session(code):
 def show_next(sta_id):
     try:
         with VCC() as vcc:
-            rsp = vcc.get_api().get(f'/sessions/next/{sta_id}')
+            rsp = vcc.get(f'/sessions/next/{sta_id}')
             if not rsp:
                 raise VCCError(rsp.text)
         now = datetime.utcnow()
@@ -181,8 +180,8 @@ def get_next_sessions(vcc, sta_id=None, start=None, end=None, days=14):
     begin = to_date(start, today)
     end = datetime.combine(to_date(end, begin + timedelta(days=days)).date(), datetime.max.time())
     if sta_id:
-        if ans:= vcc.api.get(f'/stations/{sta_id}'):
-            sessions = json_decoder(vcc.api.get(f'/sessions/next/{sta_id}',
+        if ans:= vcc.get(f'/stations/{sta_id}'):
+            sessions = json_decoder(vcc.get(f'/sessions/next/{sta_id}',
                                                 params={'days': days,
                                                         'begin': to_date(start, ''),
                                                         'end': to_date(end, '')}
@@ -192,7 +191,7 @@ def get_next_sessions(vcc, sta_id=None, start=None, end=None, days=14):
             vcc_cmd('message-box', f'-t "Station {sta_id.capitalize()} does not exist" -m "" -i "warning"')
             sessions = None
     else:
-        rsp = vcc.api.get('/sessions', params={'begin': begin, 'end': end})
+        rsp = vcc.get('/sessions', params={'begin': begin, 'end': end})
         sessions = json_decoder(rsp.json())
 
     return sessions, begin, end

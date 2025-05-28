@@ -198,10 +198,9 @@ def vcc_cmd_r(action, options, user=None, group=None):
 
 # Output VCC package version
 def show_version():
-    import pkg_resources  # part of setuptools
-    print('vcc version', pkg_resources.require("vcc")[0].version)
+    from importlib import metadata
+    print(metadata.version("vcc"))
     sys.exit(0)
-
 
 def help(subject):
     import pkg_resources  # part of setuptools
