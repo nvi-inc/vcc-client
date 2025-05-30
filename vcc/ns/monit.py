@@ -38,6 +38,7 @@ class InboxMonitor(Thread):
         return time.time() - t
 
     def run(self):
+        logger.info(f'monit started {self.native_id}')
         dt = self.check_inbox()
         while not self.stopped.wait(self.interval if dt > self.interval else self.interval - dt):
             dt = self.check_inbox()
@@ -64,8 +65,7 @@ class InboxMonitor(Thread):
                     logger.warning(f'message invalid - {index:2d} {line.strip()}')
 
     def pong(self, sender, status='Ok'):
-
         try:
-            rsp = self.vcc.post(f'/messages/pong', data={'key': sender, 'status': status})
+            self.vcc.post(f'/messages/pong', data={'key': sender, 'status': status})
         except VCCError as err:
             logger.warning(f"pong {str(err)}")
