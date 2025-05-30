@@ -137,8 +137,6 @@ class DowntimeMsg(BaseMessage):
     def __init__(self, utc, code, status, data):
         super().__init__(utc, code, status, data)
 
-        print('Downtime', data)
-        print('start', type(data['start']))
         self._sta_code = data['station'].capitalize()
         self.cancelled = data.get('cancelled', False)
         self._start, self._end = self.start(data['start']), self.end(data['end'])
@@ -422,7 +420,6 @@ class InboxWnd(tk.Tk):
         self.listener = None
         self.display = display
 
-
     def init_wnd(self):
         # Set the size of the tkinter window
         code = getattr(settings.Signatures, self.group_id)[0]
@@ -545,28 +542,10 @@ class InboxWnd(tk.Tk):
         self.mainloop()
 
 
-def check_inbox(group_id, interval):
+def check_inbox(group_id, interval, display=None):
 
-    InboxWnd(group_id, interval=interval).exec()
-
-
-def main():
-
-    import argparse
-
-    parser = argparse.ArgumentParser(description='Inbox for Field System')
-    parser.add_argument('-c', '--config', help='config file', required=False)
-    parser.add_argument('-D', '--display', help='display', required=True)
-
-    args = settings.init(parser.parse_args())
-
-    try:
-        InboxWnd('NS', display=args.display).exec()
-    except Exception as exc:
-        pass
-
-
-if __name__ == '__main__':
-
-    sys.exit(main())
-
+    if not settings.get_user_code('NS'):
+        InboxWnd(group_id, interval=interval).exec()
+    else:
+        display = display or os.environ.get('DISPLAY')
+        InboxWnd('NS', interval=interval, display=display).exec()

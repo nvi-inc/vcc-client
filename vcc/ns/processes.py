@@ -45,21 +45,20 @@ def send_msg(header, data):
 def get_port(display):
     for index, prc in enumerate(psutil.process_iter()):
         try:
-            if prc.name() == 'inbox-ns':
+            if prc.name() == 'inbox':
                 param = prc.cmdline()
-                if param[param.index('-D') + 1] == display:
+                if 'NS' in param and param[param.index('-D') + 1] == display:
                     for conn in prc.net_connections():
                         if conn.status == 'LISTEN':
                             return Addr(*conn.laddr).port
         except (IndexError, Exception):
             pass
-    print('get_port', None)
     return None
 
 
 def start_inbox(display):
-    logger.info(f"Start inbox-ns with DISPLAY {display}")
-    vcc_cmd('inbox-ns', f"-D '{display}'", user='oper', group='rtx')
+    logger.info(f"Start inbox with DISPLAY {display}")
+    vcc_cmd('inbox NS', f"-D '{display}'", user='oper', group='rtx')
     for _ in range(5):
         if port := get_port(display):
             return port

@@ -30,7 +30,6 @@ def add_arguments(parser):
     parser.add_argument('-s', '--start', help='start date for first session', required=False)
     parser.add_argument('-e', '--end', help='end date for last session', required=False)
     parser.add_argument('-d', '--days', help='number of days', type=int, default=7, required=False)
-    parser.add_argument('-D', '--display', help='display name', required=False)
 
 
 # Generate a parser for list of sessions
@@ -68,8 +67,10 @@ def main():
     subparsers.add_parser('test', help='Test if config file has valid signatures')
     # INBOX subprocess
     sub = subparsers.add_parser('inbox', help='Monitor or Read inbox for group')
-    sub.add_argument('-i', '--interval', help='reading interval', type=int, default=0)
     sub.add_argument('group', help='group id of inbox', choices=['CC', 'OC', 'AC', 'CC', 'NS'], type=str.upper)
+    sub.add_argument('-i', '--interval', help='reading interval', type=int, default=0)
+    sub.add_argument('-D', '--display', help='display name', required=False)
+
     # SKED subprocess
     sub = subparsers.add_parser('sked', help='Upload schedule files (Operations Center only)')
     sub.add_argument('-q', '--quiet', help='do not notify users', action='store_true')
@@ -135,7 +136,7 @@ def main():
         elif args.action == 'urgent':
             VCCMessage().exec()
         elif args.action == 'inbox':
-            check_inbox(args.group, args.interval)
+            check_inbox(args.group, args.interval, args.display)
         elif args.action == 'downtime':
             downtime(args.station, args.report)
         elif args.action in master_types.keys():

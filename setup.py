@@ -4,7 +4,7 @@ setup(
     name='vcc',
     packages=['vcc', 'vcc.ns', 'vcc.images'],
     description='Client software for VLBI Operations Center (VCC)',
-    version='1.5.4',
+    version='1.5.5',
     url='https://github.com/nvi-inc/vcc-client',
     author='Mario',
     author_email='mario.berube@nviinc.com',
@@ -27,7 +27,6 @@ setup(
             'urgent=vcc.__main__:main',
             'inbox=vcc.__main__:main',
             'vcc-config=vcc.config:main',
-            'inbox-ns=vcc.inbox:main',
             'vccmon=vcc.ns.service:main'
         ]
     },

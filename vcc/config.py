@@ -90,10 +90,11 @@ class ConfigDecoder:
                     self.make_script('vccmon', nohup=True)
                     self.make_script('vccns')
                     self.make_script('fslog')
+                    self.make_script('vcc', action='inbox NS', nohup=True)
                 else:
                     self.config_option = True
                     self.make_script('vcc', action='master')
-                    self.make_script('vcc', action='inbox', nohup=True, cmdline=['-r', '--read'])
+                    self.make_script('vcc', action='inbox', nohup=True)
 
                 self.make_script('vcc')
                 self.make_script('vcc', action='dashboard', nohup=True)
@@ -111,7 +112,7 @@ class ConfigDecoder:
     # Make a script that could be used as a command
     def make_script(self, app, action='', nohup=False, cmdline=None):
 
-        path = Path(self.bin, action if action else app)
+        path = Path(self.bin, action.split()[0] if action else app)
         pre, post = ('nohup ', ' >/dev/null 2>&1 &') if nohup else ('', '')
         config_option = f" -c {self.config.absolute()}" if self.config_option else ""
         cmd = f"{str(Path(self.exec, app))}{config_option} {action} $@"
@@ -154,7 +155,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='Create VCC config file')
     parser.add_argument('-o', '--output', help='output configuration file', required=False)
-    parser.add_argument('input', help='input binary file')
+    parser.add_argument('input', help='path to encrypted file or vcc.ctl')
     parser.add_argument('key', help='private rsa key file', default='~/.ssh/id_rsa', nargs='?')
 
     args = parser.parse_args()

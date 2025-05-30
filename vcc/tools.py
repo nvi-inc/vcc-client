@@ -9,7 +9,7 @@ from tkinter import ttk
 
 from vcc import settings, json_decoder, vcc_cmd
 from vcc.client import VCC
-from vcc.utils import master_types
+from vcc.utils import master_types, get_next_sessions
 
 
 class Sessions:
