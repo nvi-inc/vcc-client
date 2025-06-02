@@ -85,17 +85,17 @@ def upcoming_sessions(ses_type, code, args):
     sta_id = code
     with VCC() as vcc:
         session_list, begin, end = get_next_sessions(vcc, sta_id, args.start, args.end, args.days)
-        if not session_list:
-            return
-        now = datetime.utcnow()
-        sessions = [json_decoder(rsp.json()) for code in session_list if (rsp := vcc.get(f'/sessions/{code}'))]
-        data = [ses for ses in sessions if ses['start'] > now and ses['master'] in master]
-
+        if session_list:
+            now = datetime.utcnow()
+            sessions = [json_decoder(rsp.json()) for code in session_list if (rsp := vcc.get(f'/sessions/{code}'))]
+            data = [ses for ses in sessions if ses['start'] > now and ses['master'] in master]
+        else:
+            data = []
         type_str = master_types.get(ses_type, '')
         sta_str = f' for {sta_id.capitalize()}' if sta_id else ''
-        when = f" ({begin.date()} to {end.date()})" if sessions else ''
+        when = f" ({begin.date()} to {end.date()})"
         title = f'List of {type_str}sessions{sta_str}{when}'
-        display_option = f'{args.display}' if args.display else ''
+        display_option = f'{args.display}' if hasattr(args, 'display') else ''
         try:
             Sessions(title, data, display_option)
         except tkinter.TclError:

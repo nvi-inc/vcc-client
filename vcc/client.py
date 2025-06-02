@@ -205,11 +205,14 @@ class VCC:
 
 def get_server():
     def _decode(item):
-        key, val = item.split(':')
         try:
-            return key, int(val)
+            key, val = item.split(':')
+            try:
+                return key, int(val)
+            except ValueError:
+                return key, val
         except ValueError:
-            return key, val
+            raise VCCError('cannot find any VCC in config file')
 
     for name, info in settings.Servers.__dict__.items():
         config = dict([_decode(item) for item in info.split(',')]+[('key', settings.RSAkey.path)])
