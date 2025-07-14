@@ -1,12 +1,36 @@
 import os
-from pathlib import Path
 import re
 import bz2
+
+from functools import cache, lru_cache
+from datetime import datetime
+from pathlib import Path
 
 from vcc import settings, message_box
 from vcc.client import VCC, VCCError
 from vcc.progress import ProgressDots
 from vcc.session import Session
+
+
+def time2fs(timestamp: float) -> str:
+    return datetime.utcfromtimestamp(timestamp).strftime('%Y.%j.%H:%M:%S.%f')[:20]
+
+
+@cache
+def day1(year: int) -> float:
+    return datetime(year, 1, 1).timestamp()
+
+
+@lru_cache(maxsize=100)
+def ydh2sec(text):
+    year, day, hour = [int(s) for s in text.split('.')]
+    return day1(year) + (day - 1) * 86400 + hour * 3600
+
+
+def fs2time(text):
+    ydh, _, ms = text.partition(':')
+    minutes, seconds = [float(s) for s in ms.split(':')]
+    return ydh2sec(ydh) + minutes * 60 + seconds
 
 
 class BZ2log:

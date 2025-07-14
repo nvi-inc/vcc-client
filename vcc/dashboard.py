@@ -278,7 +278,7 @@ class Dashboard(tk.Tk):
     def station_clicked(self, event):
         row, col = self.stations.identify_row(event.y), self.stations.identify_column(event.x)
         if row:
-            if not self.comm_status[row]:
+            if not self.comm_status[row][1]:
                 self.stations.selection_remove(row)
                 self.stations.item(row, tags=('problem',))
             if col == '#3' and self.sefds.get(row):
@@ -307,7 +307,8 @@ class Dashboard(tk.Tk):
 
         for sta in self.session.network:
             self.stations.insert('', 'end', sta.capitalize(), values=(sta.capitalize(), 'None', 'N/A'), tags=('all',))
-            self.comm_status[sta] = datetime.utcnow()
+            self.comm_status[sta] = [datetime.utcnow(), True]
+            self.update_station_info(sta, '#5', "not connected to VCC", tags=('problem',))
 
         self.inbox.ping_stations(self.session.network)
 
@@ -327,14 +328,17 @@ class Dashboard(tk.Tk):
         return frame
 
     def check_comm_status(self, utc):
-        for sta_id, t in self.comm_status.items():
-            if not t or utc - t > self.lost_comm:
-                self.update_station_info(sta_id, '#5', "not connected to VCC", tags=('problem',))
-                if t:
+        for sta_id, (t, connected) in self.comm_status.items():
+            if utc - t > self.lost_comm:
+                if connected:
+                    self.update_station_info(sta_id, '#5', "not connected to VCC", tags=('problem',))
                     self.logs.get(sta_id).add(utc, "not connected to VCC", status='problem')
-                self.comm_status[sta_id] = None
+                self.comm_status[sta_id][1] = False
             else:
-                self.update_station_info(sta_id, '#5', "", tags=('valid',))
+                if not connected:
+                    self.update_station_info(sta_id, '#5', "", tags=('valid',))
+                    self.logs.get(sta_id).add(utc, "re-connected to VCC")
+                self.comm_status[sta_id][1] = True
 
 
     def update_status(self, utc):
@@ -431,7 +435,7 @@ class Dashboard(tk.Tk):
 
     def process_pong(self, headers, data):
         if sta_id := headers.get('sender'):
-            self.comm_status[sta_id] = datetime.utcnow()
+            self.comm_status[sta_id][0] = datetime.utcnow()
 
     def process_sta_info(self, headers, data):
         sta_id = data.get('station', None)

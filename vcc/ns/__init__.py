@@ -1,8 +1,11 @@
-import re
 import json
-import psutil
 import logging
+import os
+import psutil
+import re
+
 from pathlib import Path
+from subprocess import Popen, PIPE
 
 from psutil import process_iter, AccessDenied, NoSuchProcess
 
@@ -21,15 +24,11 @@ def get_displays(display=None):
     displays = []
     for prc in psutil.process_iter():
         try:
-            logger.warning(f"DISPLAY {prc.pid} {prc.name()} {prc.username()} {prc.environ().get('DISPLAY', None)}")
             displays.append(prc.environ().get('DISPLAY', None))
         except:
             pass
 
-    logger.warning(f"DISPLAYS {list(filter(None, list(set(displays))))}")
-
     return list(filter(None, list(set(displays))))
-
 
 
 # Notify oper using vcc message_box. Pop message box to all displays or the user display
@@ -52,16 +51,14 @@ def show_sessions(title, sessions, option='', display=None):
         vcc_cmd('sessions-wnd', options, user='oper', group='rtx')
 
 
+PATH = ':'.join(["/usr2/st/bin", "/usr2/fs/bin", os.environ.get('PATH')])
+
+
 def get_ddout_log():
-    """
-    Get log opened by Field System
-    """
-    for proc in process_iter(['name', 'pid']):
-        if proc.info['name'] == 'ddout':
-            try:
-                for file in proc.open_files():
-                    if file.path.startswith('/usr2/log'):
-                        return Path(file.path)
-            except (NoSuchProcess, AccessDenied):
-                return None
-    return None
+    try:
+        output, _ = Popen(['lognm'], env={'PATH': PATH}, stdout=PIPE).communicate()
+        return Path('/usr2/log', f"{name}.log") if (name := output.decode('utf-8').strip()) else None
+    except FileNotFoundError as exc:
+        logger.warning(str(exc))
+        return None
+

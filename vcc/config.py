@@ -5,6 +5,7 @@ import sys
 import traceback
 if platform.system() != "Windows":
     import pwd
+    import getpass
 
 import toml
 from Crypto.PublicKey import RSA
@@ -17,15 +18,18 @@ class ConfigDecoder:
 
     def __init__(self):
 
-        (self.uid, self.gid) = (None, None) if platform.system() == "Windows" else (os.getuid(), os.getgid())
+        self.user = None if platform.system() == "Windows" else pwd.getpwnam(getpass.getuser())
         self.wd, self.exec = Path(os.getcwd()), Path(sys.executable).parent
         self.config, self.config_option = None, False
         self.bin = Path(self.wd, 'bin')
         self.bin.mkdir(exist_ok=True)
+        self.messages = Path(self.wd, 'messages')
+        self.messages.mkdir(exist_ok=True)
 
-    def chown(self, path: Path, mode: int) -> None:
+    def chown(self, path: Path, mode: int, user=None) -> None:
         if platform.system() != "Windows":
-            os.chown(path, self.uid, self.gid)
+            (uid, gid) = (user.pw_uid, user.pw_gid) if user else (os.getuid(), os.getgid())
+            os.chown(path, uid, gid)
         path.chmod(mode)
 
     def decode(self, infile, outfile, keyfile):
@@ -36,17 +40,16 @@ class ConfigDecoder:
                 exit(0)
 
             with open(infile, 'r') as f_in:
-
                 enc_key, nonce, tag, encrypted = [b64decode(bytes.fromhex(x)) for x in f_in.read().split('-')]
-                # enc_key, nonce, tag, encrypted = [f_in.read(x) for x in (private_key.size_in_bytes(), 16, 16, -1)]
                 key = PKCS1_OAEP.new(private_key).decrypt(enc_key)
                 decoded = AES.new(key, AES.MODE_EAX, nonce).decrypt_and_verify(encrypted, tag).decode('utf-8')
-                # Fix problems with old config.txt file
-                decoded = decoded.replace('/usr2/prc', '/usr2/proc').replace('/user/fs/bin', '/usr2/fs/bin')
-                decoded = decoded.replace('schedule = \"\"', 'schedule = \"\"  #')
+                # Load decoded data into memory
                 settings = toml.loads(decoded)
-                self.config = Path(outfile) if outfile else \
-                    Path('/usr2/control/vcc.ctl' if settings['Signatures'].get('NS') else 'vcc.ctl')
+
+                # Test output file
+                if not outfile:
+                    outfile = '/usr2/control/vcc.ctl' if settings['Signatures'].get('NS') else 'vcc.ctl'
+                self.config = Path(outfile)
                 if self.config.exists():
                     while True:
                         if (answer := input(f'{self.config} already exists! Overwrite it? (y/n)').lower()) == 'y':
@@ -56,36 +59,24 @@ class ConfigDecoder:
                             print('New configuration not saved!')
                             return
 
-                # Select access method for vcc. https or ssh tunnel
-                while True:
-                    if (option := input('Please select method for accessing VCC'
-                                        '\n\t1 - https\n\t2 - ssh tunnel\n\tq - quit setup\n\t').lower()) in '12q':
-                        if option == 'q':
-                            print('Configuration terminated.')
-                            return
-                        break
-                comment = 'tunnel:' if option == '1' else 'protocol:https'
-                for index, line in enumerate(lines := decoded.splitlines()):
-                    if comment in line:
-                        lines[index] = f'# {line}'
+                # Save configuration
                 with open(self.config, 'w') as f_out:
-                    # Fix problems in old
-                    f_out.write('\n'.join(lines))
-                    p = os.path.abspath(os.path.expanduser(keyfile))
+                    f_out.write(decoded)
+                    p = str(Path(keyfile).expanduser().absolute())
                     if platform.system() == "Windows":
                         p = p.replace('\\', '\\\\')
-                    f_out.write(f'\n# Private key to access VCC\n[RSAkey]\n'
-                                f'path = \"{p}\"\n')
+                    f_out.write(f'\n# Private ssh key to access VCC\n[RSAkey]\npath = \"{p}\"\n')
                 print(f'VCC configuration saved in {self.config}')
+
                 # Create some scripts in bin folder that could be added to path
                 if settings['Signatures'].get('NS'):
-                    oper = pwd.getpwnam('oper')
-                    self.uid, self.gid = oper.pw_uid, oper.pw_gid
-                    self.chown(self.config, 0o664)
-                    self.chown(self.bin, 0o775)
+                    prog, oper = pwd.getpwnam('prog'), pwd.getpwnam('oper')
+                    self.chown(self.config, 0o664, user=oper)
+                    self.chown(self.bin, 0o775, user=prog)
+                    self.chown(self.messages, 0o775, user=oper)
                     log_dir = Path('/usr2/log/vcc')
                     log_dir.mkdir(exist_ok=True)
-                    self.chown(log_dir, 0o775)
+                    self.chown(log_dir, 0o775, user=oper)
                     self.make_service_file(log_dir)  # service file for systemd
                     self.make_script('vccmon', nohup=True)
                     self.make_script('vccns')
@@ -128,7 +119,7 @@ class ConfigDecoder:
                 print('done\n', file=f)
             print(f"{pre}{cmd}{post}\n", file=f)
 
-        self.chown(path, 0o775)
+        self.chown(path, 0o775, self.user)
 
     def make_service_file(self, log_dir):
         filename = Path(log_dir, 'service.log')

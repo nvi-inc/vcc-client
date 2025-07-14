@@ -1,4 +1,5 @@
 import shutil
+import time
 from threading import Thread, Event
 import traceback
 import logging
@@ -7,15 +8,16 @@ import os
 import json
 import psutil
 import tempfile
+import sys
 
 from collections import namedtuple
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from vcc import settings, make_path, vcc_cmd
 from vcc.utils import get_next_sessions
 from vcc.ns.drudg import DRUDG
 from vcc.ns import get_displays, show_sessions, notify
-from vcc.socket import Client
 from vcc import json_encoder, json_decoder
 
 
@@ -25,67 +27,47 @@ logger = logging.getLogger('vcc')
 
 
 def send_msg(header, data):
-    for display in get_displays():
-        try:
-            if (port := get_port(display)) or (port := start_inbox(display)):
-                client = Client('127.0.0.1', port)
-                client.send(json.dumps((header, data), default=json_encoder).encode("utf-8"))
-        except Exception as exc:
-            logger.warning(f'send msg {str(exc)}')
-    # Save msg in hidden directory
-    path = Path(os.environ.get('VCC_HIDDEN', '/tmp'), 'vcc-msg-ns.json')
+
+    # Save msg in messages directory
+    path = Path(Path(sys.prefix).parent, 'messages', "ns.json")
     path.touch(exist_ok=True)
-    with open(path, 'r+') as f:
+    # Read old records
+    with open(path, 'r') as f:
         records = json_decoder(json.loads(record)) if (record := f.read()) else []
-        records.append((header, data))
-        f.seek(0)
+        records.append((json_decoder(header), data))
+    # Remove records older than 5 days
+    too_old = datetime.utcnow() - timedelta(days=5)
+    records = [rec for rec in records if rec[0]['utc'] > too_old]
+    # Save to temporary and rename (to avoid overwriting file being read)
+    tmp = tempfile.NamedTemporaryFile(delete=False).name
+    with open(tmp, 'w') as f:
         f.write(json.dumps(records, default=json_encoder))
+    shutil.move(tmp, str(path), copy_function=shutil.copyfile)
+    path.chmod(0o664)
+
+    # Start inbox if needed
+    inboxes = get_inboxes()
+    for display in get_displays():
+        if not inboxes.get(display, None):
+            start_inbox(display)
 
 
-def get_port(display):
+def get_inboxes():
+    inboxes = {}
     for index, prc in enumerate(psutil.process_iter()):
         try:
-            if prc.name() == 'inbox':
-                param = prc.cmdline()
-                if 'NS' in param and param[param.index('-D') + 1] == display:
-                    for conn in prc.net_connections():
-                        if conn.status == 'LISTEN':
-                            return Addr(*conn.laddr).port
+            if prc.name() == 'vcc':
+                ok = {'inbox', 'NS'}.issubset(prc.cmdline())
+                if {'inbox', 'NS'}.issubset(prc.cmdline()) and (display := prc.environ().get('DISPLAY', None)):
+                    inboxes[display] = prc.pid
         except (IndexError, Exception):
             pass
-    return None
+    return inboxes
 
 
 def start_inbox(display):
-    logger.info(f"Start inbox with DISPLAY {display}")
-    vcc_cmd('inbox NS', f"-D '{display}'", user='oper', group='rtx')
-    for _ in range(5):
-        if port := get_port(display):
-            return port
-        Event().wait(1)
-    return None
-
-
-class ProcessMaster(Thread):
-    # overriding constructor
-    def __init__(self, vcc, sta_id, headers, data):
-        # calling parent class constructor
-        Thread.__init__(self)
-        self.vcc, self.sta_id = vcc, sta_id
-        self.headers, self.data = headers, data
-
-    def run(self):
-        send_msg(self.headers, self.data)
-
-    def _run(self):
-        show_sessions(f'List of modified sessions for {self.sta_id}', list(self.data.items()))
-        # Get session information
-        session_list, begin, end = get_next_sessions(self.vcc, self.sta_id)
-        sessions = [(ses_id, self.data.get(ses_id, '')) for ses_id in session_list] if session_list else []
-        # Display information
-        when = f" ({begin.date()} to {end.date()})" if sessions else ''
-        title = f'List of sessions for {self.sta_id.capitalize()}{when}'
-        show_sessions(title, sessions, option='-M ')
+    env = {'DISPLAY': display}
+    return vcc_cmd('/usr2/vcc/bin/inbox', '', user='oper', group='rtx', env=env)
 
 
 class ProcessSchedule(Thread):
@@ -141,7 +123,6 @@ class ProcessSchedule(Thread):
         logger.info(f'{filename} downloaded')
         # Execute drudg
         drudg_it = settings.Messages.Schedule.drudg
-        logger.info(f'drudg_it {drudg_it}')
         if drudg_it == 'no':
             self.data['processed'] = (f'{filename} has been downloaded but not processed<br><br>'
                                       f'DRUDG is not set for automatic mode')
@@ -205,24 +186,3 @@ class ProcessMsg(Thread):
 
     def run(self):
         send_msg(self.headers, self.data)
-
-
-class ProcessUrgent(Thread):
-    # overriding constructor
-    def __init__(self, vcc, sta_id, headers, data):
-        # calling parent class constructor
-        Thread.__init__(self)
-        self.vcc, self.sta_id = vcc, sta_id
-        self.headers, self.data = headers, data
-
-    def run(self):
-        send_msg(self.headers, self.data)
-
-    def _run(self):
-        title = f'Urgent message from {self.data.get("fr", "?")}'
-        msg = self.data.get("message", "EMPTY").splitlines()
-        notify(title, '<br>'.join(msg), icon='urgent')
-        logger.info(title)
-        for index, line in enumerate(msg, 1):
-            logger.info(f'{index:2d} {line}')
-

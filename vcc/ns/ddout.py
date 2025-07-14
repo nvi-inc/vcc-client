@@ -1,37 +1,16 @@
-import os.path
 from threading import Thread, Event
 from datetime import datetime, timedelta
 import re
 import logging
-import traceback
 from pathlib import Path
-from functools import cache, lru_cache
 
 from vcc import VCCError, json_decoder, vcc_cmd
 from vcc.ns import get_ddout_log
 from vcc.ns.onoff import post_onoff
+from vcc.fslog import fs2time
+
 
 logger = logging.getLogger('vcc')
-
-def time2fs(timestamp: float) -> str:
-    return datetime.utcfromtimestamp(timestamp).strftime('%Y.%j.%H:%M:%S.%f')[:20]
-
-
-@cache
-def day1(year: int) -> float:
-    return datetime(year, 1, 1).timestamp()
-
-
-@lru_cache(maxsize=100)
-def ydh2sec(text):
-    year, day, hour = [int(s) for s in text.split('.')]
-    return day1(year) + (day - 1) * 86400 + hour * 3600
-
-
-def fs2time(text):
-    ydh, _, ms = text.partition(':')
-    minutes, seconds = [float(s) for s in ms.split(':')]
-    return ydh2sec(ydh) + minutes * 60 + seconds
 
 
 # Read records from log file opened by ddout
@@ -129,23 +108,25 @@ class DDoutScanner(Thread):
 
     # Send station status to VCC Messenger
     def send_status(self, info):
+        logger.info(f"status {info}")
         for (is_key, status) in self.keys:
             if rec := is_key(info):
                 if status:
-                    msg = {'status': status.format(ses_id=self.ses_id, key=rec['key']), 'session': self.ses_id}
-                    self.send_msg(msg)
+                    self.send_msg(status.format(ses_id=self.ses_id, key=rec['key']))
                 return
 
-    def send_msg(self, msg):
+    def send_msg(self, status):
+        logger.info(f"sending status {status}")
         try:
-            self.vcc.post(f'/messages/', data={'code': 'status', 'key': 'sta_msg', 'msg': msg})
+            self.vcc.post(f'/messages/status', data={'session': self.ses_id, 'station': self.sta_id, 'status': status})
         except VCCError as exc:
-            logger.warning(f"send_msg {str(exc)}")
+            logger.warning(f"send_msg failed [{str(exc)}]")
 
     # The continuous function
     def run(self):
         logger.info(f'ddout started {self.native_id}')
-        while not self.stopped.wait(0.5):
+
+        while not self.stopped.wait(0.1):
             try:
                 if path := get_ddout_log():
                     last = self.open_log(path)

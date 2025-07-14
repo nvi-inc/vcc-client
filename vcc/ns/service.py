@@ -8,7 +8,7 @@ from datetime import datetime
 
 from threading import Thread, Event
 
-from vcc import VCCError, settings
+from vcc import settings
 from vcc.client import VCC
 from vcc.ns.monit import InboxMonitor
 from vcc.ns.ddout import DDoutScanner
@@ -94,14 +94,13 @@ class VCCmon(Thread):
             # Terminated. Close all connections
             for prc in reversed(threads):
                 prc.stop()
-            logger.debug('wait for threads')
             for prc in reversed(threads):
                 prc.join()
         logger.info('vccmon stopped')
         sys.exit(0)
 
     def terminate(self, sig, alarm):
-        logger.debug(f'service stop requested {sig}')
+        logger.debug(f'vccmon stop requested')
         self.stopped.set()
 
 

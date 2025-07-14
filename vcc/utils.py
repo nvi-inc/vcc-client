@@ -165,13 +165,12 @@ def to_date(txt, default=''):
     try:
         return datetime.fromisoformat(txt)
     except (ValueError, TypeError):
-        try:
-            return datetime.strptime(txt, '%Y%m%d')
-        except (ValueError, TypeError):
+        for fmt in ('%Y%m%d', '%Y-%m-%d'):
             try:
-                return datetime.strptime(txt, '%Y-%m-%d')
+                return datetime.strptime(txt, fmt)
             except (ValueError, TypeError):
-                return default
+                pass
+    return default
 
 
 def get_next_sessions(vcc, sta_id=None, start=None, end=None, days=14):

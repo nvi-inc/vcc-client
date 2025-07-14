@@ -100,12 +100,6 @@ def main():
     sub.add_argument('session', help='session code', nargs='?')
     sub.add_argument('station', help='station code', nargs='?')
 
-    # HELP subprocess
-    sub = subparsers.add_parser('help', help='VCC help')
-    sub.add_argument('subject', help='subject', nargs='?', default='')
-    # urgent subprocess
-    subparsers.add_parser('urgent', help='start urgent interface')
-
     # Session type subprocess
     for code, mtype in master_types.items():
         sub = subparsers.add_parser(code, help=f'Get list of {mtype} sessions')
@@ -119,8 +113,6 @@ def main():
         settings.init(args)
         if args.action == 'version':  # Show version
             show_version()
-        elif args.action == 'help':  # Help
-            help(args.subject)
         elif args.action == 'test':  # Run VCC test for config file
             test_users()
         elif args.action == 'sked':  # Upload schedule file

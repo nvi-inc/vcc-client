@@ -11,22 +11,32 @@ class BadConfigurationFile(Exception):
 
 
 # Get application input options and parameters
-def init(args):
+def init(*argv, **kwargs):
     # Initialize global variables
     this_module = sys.modules[__name__]
 
+    # Input is path of control file
+    if path := kwargs.get('path', None):
+        args = make_object({'config': path})
+    elif argv:
+        args = argv[0]
+    else:
+        print('invalid settings parameters')
+        sys.exit(1)
+
     # Store all arguments under args variable
     setattr(this_module, 'args', args)
-    for path in [Path(args.config if args.config else 'vcc.ctl'), Path('/usr2/control/vcc.ctl'), Path(Path.home(), 'vcc.ctl')]:
-        if path.exists():
-            args.config = str(path)
+    default = Path(args.config) if args.config else Path(Path.cwd(), 'vcc.ctl')
+    for file in [default, Path('/usr2/control/vcc.ctl'), Path(Path.home(), 'vcc.ctl')]:
+        if file.exists():
+            args.config = str(file)
             break
-
     if data := get_config_data(args.config):
         # Add information in config file to this module
         make_object(data, this_module)
         return args
     print('no valid configuration file')
+    sys.exit(1)
 
 
 def check_privilege(groups):

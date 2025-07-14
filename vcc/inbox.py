@@ -1,10 +1,12 @@
 import json
 import os
+import signal
 import traceback
 from threading import Thread, Event
 import tempfile
 import logging
 import time
+import fcntl
 
 import sys
 from datetime import datetime, timedelta
@@ -278,6 +280,8 @@ class Messages(ttk.Treeview):
         self.records, self.id = {}, 0
         self.active_wnd_msg = None
         self.update_status_wnd = None
+        self.last = datetime.utcnow() - timedelta(days=5)
+        self.user_file = self.group_file = None
 
         header = {'Time': (150, tk.W, tk.NO), 'Category': (100, tk.CENTER, tk.NO), 'Title': (300, tk.W, tk.YES)}
         super().__init__(parent, column=list(header.keys()), show='headings', height=5, style='W.Treeview')
@@ -308,14 +312,12 @@ class Messages(ttk.Treeview):
         self.see(item)
         unread = [d for d in self.records.values() if d.status == 'unread']
         if new_msg:
-            utc = max(d.utc for d in unread)
+            utc = max(d.utc for d in unread) if unread else datetime.utcnow()
             title = f"You received a new message"
             message = f"You have {len(unread)} unread messages\nLast received email: {utc} UT"
             icon = 'urgent'
 
             if self.active_wnd_msg is None:
-                logger.debug(title)
-                logger.debug(message)
                 self.active_wnd_msg = MessageBox(self, title, message, icon=icon, exec_fnc=self.remove_active_window)
             else:
                 self.nametowidget(self.active_wnd_msg).refresh(title, message, icon)
@@ -357,33 +359,35 @@ class Messages(ttk.Treeview):
         unread = [d for d in self.records.values() if d.status == 'unread']
         self.display_msg(f'{len(unread)} unread messages')
 
-    def read(self, user_file, grp_file):
-        records = []
+    def read(self, user_file):
+        item = ''
         if user_file.exists():
             with open(user_file) as f:
                 data = json_decoder(json.loads(f.read()))
-                last, records = data['saved'], data['records']
-                # print('records 1', len(records), len([d for d in records.values() if d.status == 'unread']))
-        else:
-            last = datetime.utcnow() - timedelta(days=3)
-        if grp_file.exists():
-            with open(grp_file) as f:
+                self.last = data['saved']
+                if records := data['records']:
+                    for utc, code, status, data in sorted(records, key=itemgetter(0)):
+                        item = self.add_item(make_msg_record(utc, code, status, data))
+
+        self.selection_set(item)
+        self.see(item)
+
+    def read_group_messages(self, group_file):
+        if group_file.exists():
+            with open(group_file) as f:
+                records = []
                 for headers, info in json_decoder((json.loads(f.read()))):
-                    if (utc := headers['utc']) > last:
-                        records.append((utc, headers['code'], 'unread', info))
-        # print('records 2', len(records), len([d for d in records.values() if d.status == 'unread']))
-        item = ''
-        if records:
-            for utc, code, status, data in sorted(records, key=itemgetter(0)):
-                item = self.add_item(make_msg_record(utc, code, status, data))
-
-        return item
-
-    def _read(self, archive):
-        if (path := Path('archive.json')).exists():
-            with open(path) as ar:
-                for hdr, data in json_decoder(json.loads(ar.read())):
-                    self.add_item(make_msg_record(hdr['utc'], hdr['code'], 'unread', data))
+                    if (utc := headers['utc']) > self.last:
+                        status = 'urgent' if headers['code'] == 'urgent' else 'unread'
+                        records.append((utc, headers['code'], status, info))
+                if records:
+                    records = [make_msg_record(*data) for data in sorted(records, key=itemgetter(0))]
+                    for record in records[:-1]:
+                        self.add_item(record)
+                    item = self.add_item(records[-1], new_msg=True)
+                    self.last = records[-1].utc
+                    self.selection_set(item)
+                    self.see(item)
 
     def save(self, archive):
         with (open(archive, 'w') as ar):
@@ -396,7 +400,7 @@ class InboxWnd(tk.Tk):
 
     def __init__(self, group_id, interval=0, display=None):
         try:
-            fh = logging.FileHandler(f'/tmp/inbox-{display}.log')
+            fh = logging.FileHandler(f"/tmp/inbox-{display.split(':')[-1]}.log")
             fh.setLevel(logging.DEBUG)
             logger.addHandler(fh)
             if not os.environ.get('XAUTHORITY'):
@@ -410,7 +414,9 @@ class InboxWnd(tk.Tk):
             messagebox.showerror(self, f'No signature for {group_id}.')
             sys.exit(1)
 
-        self.hidden = os.environ.get('VCC_HIDDEN', tempfile.gettempdir())
+        logger.info(f"HIDDEN {sys.argv[0]}")
+        self.hidden = Path(Path(sys.prefix).parent, 'messages')
+        self.last_modified = 0
 
         self.group_id, self.interval = group_id.upper(), interval
         self.protocol("WM_DELETE_WINDOW", self.done)
@@ -438,9 +444,7 @@ class InboxWnd(tk.Tk):
         self.geometry(f"{width}x330")
 
         if self.display:
-            self.listener = Socket(self.group_id, self.messages.add_item, self.connection_status)
             self.messages.set_status_window(self.connection_status.set)
-            #port = self.listener.server.socket.getsockname()
         else:
             self.listener = InboxWatcher(self.group_id, self.messages.add_item, self.connection_status, self.interval)
 
@@ -449,9 +453,9 @@ class InboxWnd(tk.Tk):
         frame = tk.Frame(main_frame)
         # Add a Treeview widget
         self.messages = Messages(frame)
-        last = self.messages.read(self.user_archive, self.grp_archive)
-        self.messages.selection_set(last)
-        self.messages.see(last)
+        self.messages.read(self.user_archive)
+        self.messages.read_group_messages(self.grp_archive)
+        self.last_modified = self.get_last_mofified()
 
         self.messages.bind('<Double-1>', self.double_clicked)
         self.messages.bind('<Button-3>', self.popup_menu)
@@ -475,15 +479,26 @@ class InboxWnd(tk.Tk):
         frame.pack(expand=tk.NO, fill=tk.BOTH)
         return frame
 
+    def get_last_mofified(self):
+        return self.grp_archive.stat().st_mtime if self.grp_archive.exists() else 0
     @property
     def user_archive(self):
         if self.group_id == 'NS':
-            return Path(self.hidden, f"vcc-msg-{self.display.split(':')[1]}.json")
-        return Path(self.hidden, f"vcc-msg-{os.getlogin()}-{self.group_id.lower()}.json")
+            return Path(self.hidden, f"ns-{self.display.split(':')[1]}.json")
+        return Path(self.hidden, f"{self.group_id.lower()}-{os.getlogin()}.json")
 
     @property
     def grp_archive(self):
-       return Path(self.hidden, f"vcc-msg-{self.group_id.lower()}.json")
+        return Path(self.hidden, f"{self.group_id.lower()}.json")
+
+    def new_messages(self):
+        if (last_modified := self.get_last_mofified()) > self.last_modified:
+            self.messages.read_group_messages(self.grp_archive)
+            self.last_modified = last_modified
+        dt = time.time() % 1
+        waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
+        logger.info(f'new message {waiting_time}')
+        self.after(int(waiting_time*1000), self.new_messages)
 
     def double_clicked(self, event):
         item = self.messages.identify('item', event.x, event.y)
@@ -509,13 +524,11 @@ class InboxWnd(tk.Tk):
     def done(self):
         self.messages.save(self.user_archive)
         try:
-            print('stop listener')
-            logger.debug('stop listener')
             if self.listener:
+                logger.debug('stopping listener')
                 self.listener.stop()
-                print('waiting join')
                 self.listener.join(5)
-            logger.debug('listener stopped')
+                logger.debug('listener stopped')
             self.quit()
             self.destroy()
             logger.debug('destroyed')
@@ -534,11 +547,13 @@ class InboxWnd(tk.Tk):
 
     def exec(self):
         self.init_wnd()
-        self.listener.start()
+        if self.listener:
+            self.listener.start()
 
         dt = datetime.utcnow().timestamp() % 1
         waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
         self.after(int(waiting_time*1000), self.update_clock)
+        self.after(int(waiting_time*1000), self.new_messages)
         self.mainloop()
 
 

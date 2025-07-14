@@ -1,10 +1,11 @@
 import re
 import logging
-from datetime import datetime
 from pathlib import Path
 
 from vcc import VCCError, settings
 from vcc.client import VCC
+from vcc.fslog import fs2time
+
 
 logger = logging.getLogger('vcc')
 
@@ -37,7 +38,7 @@ def onoff(filepath):
     with open(path, 'r', encoding="utf8", errors="ignore") as f, VCC('NS') as vcc:
         for line in f:
             if found := is_onoff(line):
-                timestamp = datetime.strptime(found['time'], '%Y.%j.%H:%M:%S.%f')
+                timestamp = fs2time(found['time'])
                 record = {name: value for name, value in zip(header, found['data'].split())}
                 records.append(dict(**{'time': timestamp}, **record))
             elif found := is_header(line):

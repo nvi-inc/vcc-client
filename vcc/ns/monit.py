@@ -8,13 +8,13 @@ from collections import namedtuple
 from threading import Thread, Event
 
 from vcc.client import VCC, VCCError
-from vcc.ns.processes import ProcessMaster, ProcessSchedule, ProcessLog, ProcessMsg, ProcessUrgent
+from vcc.ns.processes import ProcessMsg, ProcessSchedule, ProcessLog
 
 Addr = namedtuple('addr', 'ip port')
 
 logger = logging.getLogger('vcc')
 
-process = dict(master=ProcessMaster, schedule=ProcessSchedule, log=ProcessLog, msg=ProcessMsg, urgent=ProcessUrgent)
+process = dict(schedule=ProcessSchedule, log=ProcessLog)
 
 
 class InboxMonitor(Thread):
@@ -44,7 +44,7 @@ class InboxMonitor(Thread):
             dt = self.check_inbox()
 
     def stop(self):
-        logger.debug(f'inbox stop requested')
+        logger.inbox(f'inbox stop requested')
         self.stopped.set()
 
     def process_message(self, headers, data):
@@ -57,7 +57,7 @@ class InboxMonitor(Thread):
                 data = json.loads(data) if headers.get('format', 'text') == 'json' else {}
                 text = ', '.join([f'{key}={val}' for key, val in data.items()]) if isinstance(data, dict) else str(data)
                 logger.info(f'processing message: {code} {text}')
-                if prc := process.get(code):
+                if prc := process.get(code, ProcessMsg):
                     prc(self.vcc, self.sta_id, headers, data).start()
             except Exception as exc:
                 logger.warning(f'message invalid -  0 {str(exc)}')
