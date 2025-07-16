@@ -14,8 +14,8 @@ from collections import namedtuple
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from vcc import settings, make_path, vcc_cmd
-from vcc.utils import get_next_sessions
+from vcc import settings, make_path, vcc_cmd, get_inboxes
+from vcc.inbox import show_inbox
 from vcc.ns.drudg import DRUDG
 from vcc.ns import get_displays, show_sessions, notify
 from vcc import json_encoder, json_decoder
@@ -48,7 +48,9 @@ def send_msg(header, data):
     # Start inbox if needed
     inboxes = get_inboxes()
     for display in get_displays():
-        if not inboxes.get(display, None):
+        if pid := inboxes.get(display, None):
+            show_inbox(pid)
+        else:
             start_inbox(display)
 
 
@@ -135,8 +137,7 @@ class ProcessSchedule(Thread):
         try:
             sta_id = self.sta_id.lower()
             proc = DRUDG(self.ses_id, sta_id)
-            err = proc.drudg(filename)
-            if err:
+            if err := proc.drudg(filename):
                 self.data['processed'] = (f'{filename} has been downloaded but not processed<br><br>'
                                           f'Problem DRUDGing: {err}')
                 return send_msg(self.headers, self.data)

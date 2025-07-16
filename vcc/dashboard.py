@@ -307,7 +307,7 @@ class Dashboard(tk.Tk):
 
         for sta in self.session.network:
             self.stations.insert('', 'end', sta.capitalize(), values=(sta.capitalize(), 'None', 'N/A'), tags=('all',))
-            self.comm_status[sta] = [datetime.utcnow(), True]
+            self.comm_status[sta] = [datetime.utcnow() - timedelta(hours=1), False]
             self.update_station_info(sta, '#5', "not connected to VCC", tags=('problem',))
 
         self.inbox.ping_stations(self.session.network)
@@ -329,6 +329,7 @@ class Dashboard(tk.Tk):
 
     def check_comm_status(self, utc):
         for sta_id, (t, connected) in self.comm_status.items():
+            print(sta_id, t, utc, self.lost_comm, utc - t > self.lost_comm, connected)
             if utc - t > self.lost_comm:
                 if connected:
                     self.update_station_info(sta_id, '#5', "not connected to VCC", tags=('problem',))
@@ -503,6 +504,8 @@ class Dashboard(tk.Tk):
         while not self.messages.empty():
             nbr += 1
             headers, command = self.messages.get()
+            print('HDR', headers)
+            print('MSG', command)
             # Decode command
             if headers['format'] == 'json':
                 command = json.loads(command)

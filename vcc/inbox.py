@@ -4,7 +4,6 @@ import signal
 import traceback
 from threading import Thread, Event
 import tempfile
-import logging
 import time
 import fcntl
 
@@ -17,16 +16,15 @@ import tkinter as tk
 from tkinter import ttk, messagebox, TclError
 from tkinter import font
 
-from vcc import settings, VCCError, json_encoder, json_decoder, vcc_groups
+from vcc import settings, VCCError, json_encoder, json_decoder, vcc_groups, get_inboxes
 from vcc.client import VCC
-from vcc.session import Session
 from vcc.windows import MessageBox
 from vcc.xtools import Sessions
 from vcc.xwidget import XEntry, FakeEntry
-from vcc.socket import Server
 
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+
+def show_inbox(pid):
+    os.kill(pid, signal.SIGUSR1)
 
 
 class BaseMessage:
@@ -36,6 +34,12 @@ class BaseMessage:
         info = "\n".join([f"{key}:{val}" for key, val in data.items()])
         self._details = f"Details of message\n\n{info}"
         self._title = data.get('message', 'Unknown message').splitlines()[0]
+
+    def __str__(self):
+        return f"{self.utc} - {self._title} - {self.status}"
+
+    def datetime(self):
+        return self._utc
 
     @property
     def utc(self):
@@ -110,28 +114,20 @@ class MasterMsg(BaseMessage):
     def __init__(self, utc, code, status, data):
         super().__init__(utc, code, status, data)
 
-        logger.debug(f'master {data}')
         self._sessions, nbr = [], len(data)
         self._title = f"Master was updated. {nbr} session{'s' if nbr > 1 else ''} updated."
 
     def show(self, parent, group_id):
         if not self._sessions:
-            logger.debug(f'get sessions {self._data}')
             with VCC(group_id) as vcc:
-                logger.debug(f'connected to vcc {vcc.is_available}')
                 for ses_id, status in self._data.items():
-                    logger.debug(f'request {ses_id}')
                     try:
                         rsp = vcc.get(f'/sessions/{ses_id}')
                         session = json_decoder(rsp.json())
-                    except Exception as exc:
-                        logger.debug(f'problem {str(exc)}')
-                    logger.debug(f"got {session['code']}")
-                    session['status'] = status
-                    self._sessions.append(session)
-
-        logger.debug('show Sessions')
-
+                        session['status'] = status
+                        self._sessions.append(session)
+                    except Exception:
+                        pass
         Sessions(parent, f'Master was updated ({self._utc:%Y-%m-%d})', self._sessions)
 
 
@@ -198,36 +194,6 @@ message_dict = dict(downtime=DowntimeMsg, master=MasterMsg, schedule=ScheduleMsg
 
 def make_msg_record(utc, code, status, data):
     return message_dict.get(code, BaseMessage)(utc, code, status, data)
-
-
-class Socket(Thread):
-
-    def __init__(self, group_id, update_fnc, status):
-        super().__init__()
-
-        self.stopped = Event()
-        self.group_id, self.update_fnc, self.status = group_id, update_fnc, status
-
-        self.server = Server('localhost', 0)
-
-        self.server.process = self.process_message
-        self.status.set(f'{0} unread messages')
-
-    def run(self):
-        try:
-            self.server.monit()
-        except Exception as exc:
-            print(exc)
-
-    def stop(self):
-        self.server.stop()
-
-    def process_message(self, data):
-
-        headers, info = json_decoder(json.loads(data.decode('utf-8')))
-        utc, code = headers['utc'], headers['code']
-        status = 'urgent' if code == 'urgent' else 'unread'
-        self.update_fnc(make_msg_record(utc, code, status, info), new_msg=True)
 
 
 class InboxWatcher(Thread):
@@ -310,7 +276,10 @@ class Messages(ttk.Treeview):
         self.id += 1
         self.selection_set(item) # set the next row to be the current row
         self.see(item)
-        unread = [d for d in self.records.values() if d.status == 'unread']
+        print('NBR REC', len(self.records))
+        for r in self.records.values():
+            print(f'REC {r}')
+        unread = [d for d in self.records.values() if d.status != 'read']
         if new_msg:
             utc = max(d.utc for d in unread) if unread else datetime.utcnow()
             title = f"You received a new message"
@@ -331,7 +300,7 @@ class Messages(ttk.Treeview):
 
     def set_status_window(self, fnc):
         self.update_status_wnd = fnc
-        unread = [d for d in self.records.values() if d.status == 'unread']
+        unread = [d for d in self.records.values() if d.status != 'read']
         self.display_msg(f'{len(unread)} unread messages')
 
     def remove_active_window(self):
@@ -339,9 +308,7 @@ class Messages(ttk.Treeview):
 
     def open(self, parent, group_id, item):
         rec = self.records[item]
-        logger.debug(f'open {type(rec)}')
         rec.status = 'read'
-
         rec.show(parent, group_id)
         self.set_status([item], rec.status)
 
@@ -364,7 +331,8 @@ class Messages(ttk.Treeview):
         if user_file.exists():
             with open(user_file) as f:
                 data = json_decoder(json.loads(f.read()))
-                self.last = data['saved']
+                self.last = data['last']
+                print(f"last {self.last} {type(self.last)}")
                 if records := data['records']:
                     for utc, code, status, data in sorted(records, key=itemgetter(0)):
                         item = self.add_item(make_msg_record(utc, code, status, data))
@@ -377,6 +345,8 @@ class Messages(ttk.Treeview):
             with open(group_file) as f:
                 records = []
                 for headers, info in json_decoder((json.loads(f.read()))):
+                    print(f"last {self.last} {type(self.last)}")
+                    print(f"utc {headers['utc']} {type(headers['utc'])}")
                     if (utc := headers['utc']) > self.last:
                         status = 'urgent' if headers['code'] == 'urgent' else 'unread'
                         records.append((utc, headers['code'], status, info))
@@ -385,13 +355,15 @@ class Messages(ttk.Treeview):
                     for record in records[:-1]:
                         self.add_item(record)
                     item = self.add_item(records[-1], new_msg=True)
-                    self.last = records[-1].utc
+                    self.last = records[-1].datetime()
+                    print(f"last record {self.last} {type(self.last)}")
+
                     self.selection_set(item)
                     self.see(item)
 
     def save(self, archive):
         with (open(archive, 'w') as ar):
-            data = {'saved': datetime.utcnow(), 'records': [rec.data() for rec in self.records.values()]}
+            data = {'last': self.last, 'records': [rec.data() for rec in self.records.values()]}
             ar.write(json.dumps(data, default=json_encoder))
 
 
@@ -400,21 +372,28 @@ class InboxWnd(tk.Tk):
 
     def __init__(self, group_id, interval=0, display=None):
         try:
-            fh = logging.FileHandler(f"/tmp/inbox-{display.split(':')[-1]}.log")
-            fh.setLevel(logging.DEBUG)
-            logger.addHandler(fh)
-            if not os.environ.get('XAUTHORITY'):
-                os.environ['XAUTHORITY'] = os.path.expanduser('~/.Xauthority')
-            logger.debug(f"X11 {os.environ.get('XAUTHORITY', 'None')}")
+            # Check if inbox is already running for this display.
+            if display:
+                visible = get_inboxes(os.getpid())
+                if pid := visible.get(display, None):
+                    show_inbox(pid)
+                    print(f'Inbox already running for {display}')
+                    exit(0)
+
+            print(f'Start using {display}')
             super().__init__(screenName=display)
-        except (TclError, Exception) as exc:
-            print(f'Inbox fatal error - {str(exc)}')
-            sys.exit(0)
+        except TclError as exc:
+            print(f'Inbox fatal error - TLC - {str(exc)}')
+            sys.exit(1)
+        except Exception as exc:
+            print(f'Inbox fatal error - EXC - {str(exc)}')
+            sys.exit(1)
         if not settings.check_privilege(group_id):
             messagebox.showerror(self, f'No signature for {group_id}.')
             sys.exit(1)
 
-        logger.info(f"HIDDEN {sys.argv[0]}")
+        signal.signal(signal.SIGUSR1, self.goto_top)
+
         self.hidden = Path(Path(sys.prefix).parent, 'messages')
         self.last_modified = 0
 
@@ -425,6 +404,9 @@ class InboxWnd(tk.Tk):
         self.connection_status = None
         self.listener = None
         self.display = display
+
+    def goto_top(self, sig_num, frame):
+        self.wm_attributes('-topmost', True)
 
     def init_wnd(self):
         # Set the size of the tkinter window
@@ -481,6 +463,7 @@ class InboxWnd(tk.Tk):
 
     def get_last_mofified(self):
         return self.grp_archive.stat().st_mtime if self.grp_archive.exists() else 0
+
     @property
     def user_archive(self):
         if self.group_id == 'NS':
@@ -497,7 +480,6 @@ class InboxWnd(tk.Tk):
             self.last_modified = last_modified
         dt = time.time() % 1
         waiting_time = 1.0 if dt < 0.001 else 1.0 - dt
-        logger.info(f'new message {waiting_time}')
         self.after(int(waiting_time*1000), self.new_messages)
 
     def double_clicked(self, event):
@@ -525,16 +507,12 @@ class InboxWnd(tk.Tk):
         self.messages.save(self.user_archive)
         try:
             if self.listener:
-                logger.debug('stopping listener')
                 self.listener.stop()
                 self.listener.join(5)
-                logger.debug('listener stopped')
             self.quit()
             self.destroy()
-            logger.debug('destroyed')
-        except Exception as exc:
-            logger.debug(f'problem {str(exc)}')
-        logger.debug('exit')
+        except Exception:
+            pass
         sys.exit(0)
 
     def update_clock(self):

@@ -44,13 +44,14 @@ class InboxMonitor(Thread):
             dt = self.check_inbox()
 
     def stop(self):
-        logger.inbox(f'inbox stop requested')
+        logger.info(f'inbox stop requested')
         self.stopped.set()
 
     def process_message(self, headers, data):
         code = headers['code']
-        logger.debug(f'process_message{headers} {data}')
+        logger.info(f'process_message{headers} {data}')
         if code == 'ping':
+            logger.info('receive pong')
             self.pong(headers['sender'], status='Ok')
         else:  # Decode message
             try:

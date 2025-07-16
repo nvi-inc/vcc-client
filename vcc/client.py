@@ -32,7 +32,7 @@ def http_retry(max_attempts=3, delay=0.1):
             while attempts < max_attempts:
                 try:
                     return func(self, *args, **kwargs)
-                except requests.exceptions.ConnectionError as exc:
+                except (requests.exceptions.ConnectionError, AttributeError):
                     attempts += 1
                     self.http_session = requests.session()  # reset Session
                     time.sleep(delay)

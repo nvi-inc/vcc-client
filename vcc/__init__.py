@@ -10,6 +10,7 @@ from datetime import date, datetime
 from pathlib import Path
 from subprocess import Popen, PIPE
 import hashlib
+import psutil
 
 import toml
 from cryptography.fernet import Fernet
@@ -213,3 +214,18 @@ def get_md5sum(path, chunk_size=32768):
                 break
             md5.update(chunk)
     return md5.hexdigest()
+
+
+def get_inboxes(pid=None):
+    inboxes = {}
+    for index, prc in enumerate(psutil.process_iter()):
+        try:
+            if prc.name() == 'vcc':
+                if {'inbox', 'NS'}.issubset(prc.cmdline()) and (display := prc.environ().get('DISPLAY', None)):
+                    if prc.pid != pid:
+                        inboxes[display] = prc.pid
+        except (IndexError, Exception):
+            pass
+    return inboxes
+
+
