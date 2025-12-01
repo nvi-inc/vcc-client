@@ -7,8 +7,6 @@ import re
 from pathlib import Path
 from subprocess import Popen, PIPE
 
-from psutil import process_iter, AccessDenied, NoSuchProcess
-
 from vcc import settings, vcc_cmd
 
 

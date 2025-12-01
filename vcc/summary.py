@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from vcc import settings, json_decoder
 from vcc.client import VCC

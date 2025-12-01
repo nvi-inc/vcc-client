@@ -1,11 +1,8 @@
 import json
 import os
 import signal
-import traceback
 from threading import Thread, Event
-import tempfile
 import time
-import fcntl
 
 import sys
 from datetime import datetime, timedelta
@@ -188,8 +185,26 @@ class DowntimeMsg(BaseMessage):
         return frame
 
 
+class ExecMsg(BaseMessage):
+
+    def __init__(self, utc, code, status, data):
+        super().__init__(utc, code, status, data)
+
+        self._title = f"Request to execute {data['app']}"
+
+    def show(self, parent, group_id):
+        app = self._data['app']
+        if self._data['success']:
+            title, msg = f"Successfully executed {app}", f"{app} {self._data['params']} executed"
+        else:
+            title = f"Failed executing {app}"
+            msg = f"{app} {self._data['params']} failed with error message\n {self._data['answer']}"
+        msg = f"{msg}\n\nsent: {self._utc:%Y-%m-%d %H:%M:%S} UTC"
+        MessageBox(parent, title, msg, icon='info')
+
+
 message_dict = dict(downtime=DowntimeMsg, master=MasterMsg, schedule=ScheduleMsg, sta_info=StaInfoMsg,
-                    urgent=UrgentMsg)
+                    urgent=UrgentMsg, exec=ExecMsg)
 
 
 def make_msg_record(utc, code, status, data):

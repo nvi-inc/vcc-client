@@ -2,7 +2,7 @@ import json
 import sys
 import tkinter
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import tkinter as tk
 from tkinter import ttk

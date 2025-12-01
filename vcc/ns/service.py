@@ -1,4 +1,3 @@
-import re
 import sys
 import signal
 import logging

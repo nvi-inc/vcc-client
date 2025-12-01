@@ -67,8 +67,10 @@ class DDoutScanner(Thread):
     def open_log(self, path):
         if not self.active or path.name != self.active.name:
             self.close_log()
-            self.active, self.log = path, open(path, 'r', encoding="utf8", errors="ignore")
             try:
+                while not path.exists():
+                    Event.wait(0.01)
+                self.active, self.log = path, open(path, 'r', encoding="utf8", errors="ignore")
                 self.log.seek(0, 2)
                 self.log.seek(max(self.log.tell() - 10000, 0), 0)
             except Exception as exc:

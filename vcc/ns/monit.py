@@ -8,13 +8,13 @@ from collections import namedtuple
 from threading import Thread, Event
 
 from vcc.client import VCC, VCCError
-from vcc.ns.processes import ProcessMsg, ProcessSchedule, ProcessLog
+from vcc.ns.processes import ProcessMsg, ProcessSchedule, ProcessLog, ProcessExec
 
 Addr = namedtuple('addr', 'ip port')
 
 logger = logging.getLogger('vcc')
 
-process = dict(schedule=ProcessSchedule, log=ProcessLog)
+process = dict(schedule=ProcessSchedule, log=ProcessLog, exec=ProcessExec)
 
 
 class InboxMonitor(Thread):
@@ -49,9 +49,7 @@ class InboxMonitor(Thread):
 
     def process_message(self, headers, data):
         code = headers['code']
-        logger.info(f'process_message{headers} {data}')
         if code == 'ping':
-            logger.info('receive pong')
             self.pong(headers['sender'], status='Ok')
         else:  # Decode message
             try:

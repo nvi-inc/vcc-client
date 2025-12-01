@@ -1,7 +1,6 @@
 import tkinter
 
 from pathlib import Path
-#import pkg_resources
 from importlib import resources
 import sys
 

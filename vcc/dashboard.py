@@ -1,18 +1,14 @@
 import json
-import traceback
 import time
 import math
 import sys
 from datetime import datetime, timedelta
 import threading
 import queue
-from copy import deepcopy
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox, TclError
+from tkinter import ttk, scrolledtext, TclError
 
-import requests
-
-from vcc import settings, VCCError, json_decoder, vcc_cmd
+from vcc import VCCError, json_decoder, vcc_cmd
 from vcc.client import VCC
 from vcc.session import Session
 from vcc.windows import MessageBox
@@ -329,7 +325,6 @@ class Dashboard(tk.Tk):
 
     def check_comm_status(self, utc):
         for sta_id, (t, connected) in self.comm_status.items():
-            print(sta_id, t, utc, self.lost_comm, utc - t > self.lost_comm, connected)
             if utc - t > self.lost_comm:
                 if connected:
                     self.update_station_info(sta_id, '#5', "not connected to VCC", tags=('problem',))
@@ -504,8 +499,6 @@ class Dashboard(tk.Tk):
         while not self.messages.empty():
             nbr += 1
             headers, command = self.messages.get()
-            print('HDR', headers)
-            print('MSG', command)
             # Decode command
             if headers['format'] == 'json':
                 command = json.loads(command)

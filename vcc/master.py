@@ -1,10 +1,9 @@
 import re
-import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
 from tkinter import *
-from tkinter import ttk, font, messagebox
+from tkinter import ttk, messagebox
 
 from vcc import json_decoder, VCCError, vcc_cmd
 from vcc.client import VCC

@@ -28,7 +28,6 @@ class DRUDG:
     def pattern_response(self, child, pattern, selection, end_on_error=True):
         try:
             if child.expect([pattern], timeout=self.timeout) == 0:
-                logger.debug(f'pattern {pattern.encode()} {selection} - ok')
                 if selection:
                     child.sendline(selection)
                 return True
@@ -42,14 +41,12 @@ class DRUDG:
     # start interactive drudg
     def drudg(self, filename):
 
-        logger.info(f'processing {filename}')
+        logger.info(f'drudg processing {filename}')
 
         schedule = Path(settings.Folders.schedule, os.path.basename(filename))
-        logger.debug(f'DRUDG {schedule}')
         self.modified = os.stat(schedule).st_mtime
 
-        cmd = f'{settings.DRUDG.exec} {schedule}'
-        logger.debug(f'DRUDG {cmd}')
+        cmd = f'{settings.Applications.drudg} {schedule}'
 
         # Run drudg with the working directory set to Folders.schedules
         try:
@@ -98,10 +95,8 @@ class DRUDG:
                 return False
             # and deal with the output...
             if index == 0:
-                logger.debug('prompts: done')
                 done = True  # back to main drudg prompt
             else:
-                logger.debug(f"prompts: {prompts[index]}: {str(replies[index])}")
                 child.sendline(str(replies[index]))
 
             # look for information from drudg on where the snp or prc files were placed (if they were created):
@@ -109,11 +104,8 @@ class DRUDG:
             if not match:
                 match = re.search("PROCEDURE LIBRARY FILE\s(\S*)", child.before.decode('utf-8'))
             if match:
-                logger.debug(f'prompts: match {match.group(1)}')
                 outfile = match.group(1).strip()
-                logger.debug(f'outfile 1 {outfile}')
                 outfile = outfile if os.path.dirname(outfile) else os.path.join(settings.Folders.schedule, outfile)
-                logger.debug(f'outfile 2 {outfile}')
                 # Set modified time to same than schedule file
                 os.utime(outfile, (time.time(), self.modified))
                 # Move to appropriate folder

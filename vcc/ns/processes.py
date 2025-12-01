@@ -13,6 +13,7 @@ import sys
 from collections import namedtuple
 from datetime import datetime, timedelta
 from pathlib import Path
+from subprocess import Popen, PIPE
 
 from vcc import settings, make_path, vcc_cmd, get_inboxes
 from vcc.inbox import show_inbox
@@ -187,3 +188,30 @@ class ProcessMsg(Thread):
 
     def run(self):
         send_msg(self.headers, self.data)
+
+
+class ProcessExec(Thread):
+
+    # overriding constructor
+    def __init__(self, vcc, sta_id, headers, data):
+        # calling parent class constructor
+        Thread.__init__(self)
+        self.vcc, self.sta_id = vcc, sta_id
+        self.headers, self.data = headers, data
+
+    def run(self):
+
+        app_name = self.data['app']
+        if not (app := Path(getattr(settings.Applications, app_name, "none"))):
+            self.data['success'], self.data['answer'] = False, f"{app_name} not defined in vcc.ctl"
+        elif not app.exists():
+            self.data['success'], self.data['answer'] = False, f"{app_name} does not exists"
+        else:
+            with Popen(f"{app} {self.data['params']}", shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE) as prc:
+                if not (msg := prc.communicate()[0].decode('utf-8')):
+                    self.data['success'], self.data['answer'] = True, ''
+                else:
+                    self.data['success'], self.data['answer'] = False, msg
+        logger.info(f"{app_name} {self.data['success']} {self.data['answer']}")
+        send_msg(self.headers, self.data)
+

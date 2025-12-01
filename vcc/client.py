@@ -1,21 +1,15 @@
-import functools
-import json
-import logging
 import logging.handlers
 import uuid
 import jwt
 import time
 import functools
 
-from base64 import b64decode
 from urllib.parse import quote, urljoin
 from cryptography.hazmat.primitives import serialization
 
 from datetime import datetime
 
 import requests
-import toml
-from Crypto.Cipher import AES
 from sshtunnel import (BaseSSHTunnelForwarderError,
                        HandlerSSHTunnelForwarderError, SSHTunnelForwarder)
 
@@ -43,8 +37,12 @@ def http_retry(max_attempts=3, delay=0.1):
 
 
 def load_private_key():
-    with open(settings.RSAkey.path, 'rb') as f:
-        return serialization.load_ssh_private_key(f.read(), password=None)
+    try:
+        with open(settings.RSAkey.path, 'rb') as f:
+            return serialization.load_ssh_private_key(f.read(), password=None)
+    except ValueError:
+        with open(settings.RSAkey.path, 'rb') as f:
+            return serialization.load_pem_private_key(f.read(), password=None)
 
 
 def validate_group(group_id):
