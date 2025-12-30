@@ -91,6 +91,8 @@ def main():
     sub = subparsers.add_parser('downtime', help='Report downtime of antenna')
     sub.add_argument('-r', '--report', help='output data in csv format', action='store_true')
     sub.add_argument('station', help='station code', nargs='?')
+    # URGENT subprocess
+    subparsers.add_parser('urgent', help='Call urgent interface')
     # SUMOPS subprocess
     sub = subparsers.add_parser('sumops', help='Generate SUMOPS report')
     group = sub.add_mutually_exclusive_group()

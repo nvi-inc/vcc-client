@@ -1,5 +1,6 @@
 import re
 import logging
+import time
 from pathlib import Path
 
 from vcc import VCCError, settings
@@ -12,15 +13,18 @@ logger = logging.getLogger('vcc')
 
 # Send ONOFF records to VCC
 def post_onoff(vcc, records):
-    if records:
-        try:
-            if vcc and (rsp := vcc.post('/data/onoff', data=records)):
-                logger.info(f'uploaded {len(records)} onoff records for {records[0]["source"]}')
-            else:
-                raise VCCError(rsp.text)
-        except VCCError as exc:
-            logger.warning(f'failed uploading onoff {str(exc)}')
-    return []
+    if records and vcc:
+        error = None
+        for _ in range(3):
+            try:
+                if rsp := vcc.post('/data/onoff', data=records):
+                    logger.info(f'uploaded {len(records)} onoff records for {records[0]["source"]}')
+                    return
+                error = rsp.text
+            except VCCError as exc:
+                error = str(exc)
+            time.sleep(0.1)
+        raise VCCError(error)
 
 
 def onoff(filepath):
@@ -43,6 +47,13 @@ def onoff(filepath):
                 records.append(dict(**{'time': timestamp}, **record))
             elif found := is_header(line):
                 header = ['source'] + found['data'].split()
-                records = post_onoff(vcc, records)  # Send existing onoff records to VCC
+                try:
+                    post_onoff(vcc, records)  # Send existing onoff records to VCC
+                except VCCError as exc:
+                    logger.warning(f"fail uploading onoff {str(exc)}")
+                records = []
 
-        post_onoff(vcc, records)
+        try:
+            post_onoff(vcc, records)
+        except VCCError as exc:
+            logger.warning(f"fail uploading onoff {str(exc)}")

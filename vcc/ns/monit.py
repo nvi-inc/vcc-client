@@ -42,9 +42,11 @@ class InboxMonitor(Thread):
         dt = self.check_inbox()
         while not self.stopped.wait(self.interval if dt > self.interval else self.interval - dt):
             dt = self.check_inbox()
+        logger.info('monit stopped')
+
 
     def stop(self):
-        logger.info(f'inbox stop requested')
+        logger.info(f'monit stop requested')
         self.stopped.set()
 
     def process_message(self, headers, data):
@@ -67,4 +69,4 @@ class InboxMonitor(Thread):
         try:
             self.vcc.post(f'/messages/pong', data={'key': sender, 'status': status})
         except VCCError as err:
-            logger.warning(f"pong {str(err)}")
+            logger.error(f"pong {str(err)}")

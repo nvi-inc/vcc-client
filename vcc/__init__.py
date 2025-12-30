@@ -21,7 +21,6 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 vcc_groups = {'CC': 'Coordinating Center', 'OC': "Operations Center", 'AC': 'Analysis Center',
               'CO': 'Correlator', 'NS': 'Network Station', 'DB': 'Dashboard'}
 
-
 # Error with VCC problems
 class VCCError(Exception):
     def __init__(self, err_msg):
@@ -185,9 +184,13 @@ def vcc_cmd(action, options, user=None, group=None, env=None):
 
 # Output VCC package version
 def show_version():
-    from importlib import metadata
-    print(metadata.version("vcc"))
+    print(get_version())
     sys.exit(0)
+
+
+def get_version():
+    from importlib import metadata
+    return metadata.version("vcc")
 
 
 def help(subject):

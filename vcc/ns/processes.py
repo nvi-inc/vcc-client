@@ -27,7 +27,7 @@ Addr = namedtuple('addr', 'ip port')
 logger = logging.getLogger('vcc')
 
 
-def send_msg(header, data):
+def send_msg_to_inboxes(header, data):
 
     # Save msg in messages directory
     path = Path(Path(sys.prefix).parent, 'messages', "ns.json")
@@ -69,6 +69,7 @@ def get_inboxes():
 
 
 def start_inbox(display):
+
     env = {'DISPLAY': display}
     return vcc_cmd('/usr2/vcc/bin/inbox', '', user='oper', group='rtx', env=env)
 
@@ -107,15 +108,15 @@ class ProcessSchedule(Thread):
         download_option = settings.Messages.Schedule.download.split()[0]
         if download_option == 'no':
             self.data['processed'] = 'Schedule not downloaded: configuration set to NO'
-            return send_msg(self.headers, self.data)
+            return send_msg_to_inboxes(self.headers, self.data)
         # Request file from VCC
         if not (rsp := self.vcc.get(f'/schedules/{self.ses_id}')):
             self.data['processed'] = f'Problem downloading schedule for\n\n {rsp.text}'
-            return send_msg(self.headers, self.data)
+            return send_msg_to_inboxes(self.headers, self.data)
         # Save schedule in Schedules folder
         if not (found := self.get_name(rsp.headers['content-disposition'])):
             self.data['processed'] = f"Problem downloading schedule\n\n {rsp.headers['content-disposition']}"
-            return send_msg(self.headers, self.data)
+            return send_msg_to_inboxes(self.headers, self.data)
 
         filename = found['name']
         path = make_path(settings.Folders.schedule, filename)
@@ -129,11 +130,11 @@ class ProcessSchedule(Thread):
         if drudg_it == 'no':
             self.data['processed'] = (f'{filename} has been downloaded but not processed<br><br>'
                                       f'DRUDG is not set for automatic mode')
-            return send_msg(self.headers, self.data)
+            return send_msg_to_inboxes(self.headers, self.data)
         if modified and drudg_it == 'not_modified':
             extra = '<br>'.join([f'{file} was manually modified' for file in modified])
             self.data['processed'] = f'{filename} has been downloaded but not processed<br><br>{extra}'
-            return send_msg(self.headers, self.data)
+            return send_msg_to_inboxes(self.headers, self.data)
         # Drug it
         try:
             sta_id = self.sta_id.lower()
@@ -141,7 +142,7 @@ class ProcessSchedule(Thread):
             if err := proc.drudg(filename):
                 self.data['processed'] = (f'{filename} has been downloaded but not processed<br><br>'
                                           f'Problem DRUDGing: {err}')
-                return send_msg(self.headers, self.data)
+                return send_msg_to_inboxes(self.headers, self.data)
         except Exception as exc:
             logger.warning(str(exc))
             for index, line in enumerate(traceback.format_exc().splitlines(), 1):
@@ -161,7 +162,7 @@ class ProcessSchedule(Thread):
         extra = '<br>'.join(msg)
         self.data['icon'] = 'warning' if err else 'info'
         self.data['processed'] = f"New schedule processed {' - problem drudging it' if err else ''}<br><br>{extra}"
-        return send_msg(self.headers, self.data)
+        return send_msg_to_inboxes(self.headers, self.data)
 
 
 class ProcessLog(Thread):
@@ -187,7 +188,7 @@ class ProcessMsg(Thread):
         self.headers, self.data = headers, data
 
     def run(self):
-        send_msg(self.headers, self.data)
+        send_msg_to_inboxes(self.headers, self.data)
 
 
 class ProcessExec(Thread):
@@ -212,6 +213,6 @@ class ProcessExec(Thread):
                     self.data['success'], self.data['answer'] = True, ''
                 else:
                     self.data['success'], self.data['answer'] = False, msg
-        logger.info(f"{app_name} {self.data['success']} {self.data['answer']}")
-        send_msg(self.headers, self.data)
+        logger.info(f"exec {app_name} {self.data['success']} {self.data['answer']}")
+        send_msg_to_inboxes(self.headers, self.data)
 

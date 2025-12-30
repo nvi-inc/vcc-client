@@ -22,7 +22,6 @@ class DRUDG:
         # Default timeout time (sec)
         self.timeout = 3
         self.modified = time.time()
-        logger.info('drug initialized')
 
     # Look for specific pattern and provide selection
     def pattern_response(self, child, pattern, selection, end_on_error=True):

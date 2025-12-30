@@ -37,7 +37,7 @@ def notify(title, message, icon='info', display=None):
         try:
             vcc_cmd('message-box', options, user='oper', group='rtx')
         except Exception as exc:
-            logger.warning(f"{str(exc)}")
+            logger.warning(f"notify {str(exc)}")
 
 
 # Notify oper using vcc message_box. Pop message box to all displays or the user display
@@ -55,8 +55,11 @@ PATH = ':'.join(["/usr2/st/bin", "/usr2/fs/bin", os.environ.get('PATH')])
 def get_ddout_log():
     try:
         output, _ = Popen(['lognm'], env={'PATH': PATH}, stdout=PIPE).communicate()
-        return Path('/usr2/log', f"{name}.log") if (name := output.decode('utf-8').strip()) else None
-    except FileNotFoundError as exc:
-        logger.warning(str(exc))
+        if name := output.decode('utf-8').strip():
+            return Path('/usr2/log', f"{name}.log")
+        logger.warning(f"get_ddout_log failed {ouput}")
+        return None
+    except Exception as exc:
+        logger.warning(f"get_ddout_log failed {str(exc)}")
         return None
 

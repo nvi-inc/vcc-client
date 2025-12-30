@@ -3,11 +3,11 @@ import signal
 import logging
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 from threading import Thread, Event
 
-from vcc import settings
+from vcc import settings, get_version
 from vcc.client import VCC
 from vcc.ns.monit import InboxMonitor
 from vcc.ns.ddout import DDoutScanner
@@ -26,7 +26,7 @@ class ContextFilter(logging.Filter):
     Class to format UTC time in log
     """
     def filter(self, record):
-        record.utc = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        record.utc = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
         return True
 
 
@@ -74,7 +74,7 @@ class VCCmon(Thread):
         self.sta_id, self.stopped = sta_id, Event()
 
     def run(self):
-        logger.info(f'vccmon started {self.native_id}')
+        logger.info(f'vccmon version {get_version()} started {self.native_id}')
         not_connected = False
 
         with VCC('NS') as vcc:
@@ -84,10 +84,10 @@ class VCCmon(Thread):
             while not self.stopped.wait(5):
                 if not vcc.is_available:
                     if not_connected:
-                        logger.info('not connected to vcc')
+                        logger.warning('not connected to vcc')
                         not_connected = True
                 elif not_connected:
-                    logger.info('re-connected tp vcc')
+                    logger.warning('re-connected to vcc')
                     not_connected = False
 
             # Terminated. Close all connections
@@ -99,7 +99,7 @@ class VCCmon(Thread):
         sys.exit(0)
 
     def terminate(self, sig, alarm):
-        logger.debug(f'vccmon stop requested')
+        logger.warning(f'vccmon stop requested')
         self.stopped.set()
 
 
@@ -120,7 +120,7 @@ def main():
     try:
         VCCmon(sta_id, logging_level=level).start()
     except Exception as exc:
-        logger.debug(f'end {str(exc)}')
+        logger.warning(f'ended with {str(exc)}')
         sys.exit(1)
     sys.exit(0)
 

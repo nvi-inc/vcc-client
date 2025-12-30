@@ -106,13 +106,19 @@ def upload_log(ses_id, quiet=False):
         return
 
     sta_id = settings.Signatures.NS[0].lower()
+    waiting = None
     if not quiet:
         waiting = ProgressDots('Contacting VCC .', delay=0.5)
         waiting.start()
-    with VCC('NS') as vcc:
-        upload(vcc, sta_id, ses_id)
-        if not quiet:
-            waiting.stop()
+    for _ in range(3):
+        try:
+            with VCC('NS') as vcc:
+                upload(vcc, sta_id, ses_id)
+                if waiting:
+                    waiting.stop()
+            break
+        except VCCError:
+            pass
 
 
 def download_log(vcc, filename):
