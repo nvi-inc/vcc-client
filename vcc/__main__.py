@@ -9,7 +9,7 @@ from vcc.downtime import downtime
 from vcc.inbox import check_inbox
 from vcc.master import master
 from vcc.session import Session
-from vcc.sumops import sumops
+from vcc.ns.sumops import sumops
 from vcc.urgent import VCCMessage
 from vcc.users import test_users
 from vcc.utils import (fetch_files, master_types, upload_schedule_files)
@@ -51,7 +51,7 @@ def session_args():
 
 def filter_input():
     name = Path(sys.argv[0]).name
-    param = [] if name == 'vcc' else [name]
+    param = [] if name in ['vcc','__main__.py'] else [name]
     param.extend(sys.argv[1:])
     return param
 

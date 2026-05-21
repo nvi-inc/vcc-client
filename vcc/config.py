@@ -50,23 +50,26 @@ class ConfigDecoder:
                 if not outfile:
                     outfile = '/usr2/control/vcc.ctl' if settings['Signatures'].get('NS') else 'vcc.ctl'
                 self.config = Path(outfile)
+                answer= 'y'  # only changed if config exists
                 if self.config.exists():
                     while True:
-                        if (answer := input(f'{self.config} already exists! Overwrite it? (y/n)').lower()) == 'y':
+                        answer = input(f'{self.config} already exists! Overwrite it? (y/n)').lower() 
+                        if answer == 'y':
                             self.chown(self.config, 0o666)
                             break
                         if answer == 'n':
                             print('New configuration not saved!')
-                            return
+                            break
 
                 # Save configuration
-                with open(self.config, 'w') as f_out:
-                    f_out.write(decoded)
-                    p = str(Path(keyfile).expanduser().absolute())
-                    if platform.system() == "Windows":
-                        p = p.replace('\\', '\\\\')
-                    f_out.write(f'\n# Private ssh key to access VCC\n[RSAkey]\npath = \"{p}\"\n')
-                print(f'VCC configuration saved in {self.config}')
+                if answer == 'y':
+                    with open(self.config, 'w') as f_out:
+                        f_out.write(decoded)
+                        p = str(Path(keyfile).expanduser().absolute())
+                        if platform.system() == "Windows":
+                            p = p.replace('\\', '\\\\')
+                        f_out.write(f'\n# Private ssh key to access VCC\n[RSAkey]\npath = \"{p}\"\n')
+                    print(f'VCC configuration saved in {self.config}')
 
                 # Create some scripts in bin folder that could be added to path
                 if settings['Signatures'].get('NS'):

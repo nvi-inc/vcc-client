@@ -64,6 +64,8 @@ class Editor(ttk.LabelFrame):
         self.comment.reset('', 'disabled')
         self.action.configure(state='disabled', text='Update')
         self.previous = {'start': None, 'end': None}
+        self.record.pop('id')
+        self.record_id = -1
 
     def on_change(self, code, *events):
         if code == 'reason':
@@ -281,6 +283,7 @@ class Downtime(tk.Tk):
             if action == 'Cancel':
                 self.editor.reset()
             self.show_affected_sessions(record)
+            print(record)
         except VCCError as exc:
             messagebox.showerror('Could not update record on VCC', str(exc))
         self.after(300, lambda: self.editor.refresh(self.style))

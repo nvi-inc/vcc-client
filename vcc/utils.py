@@ -3,13 +3,64 @@ import re
 import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta
+import sys
+from threading import Thread, Event
+import bz2
 
 from tkinter import messagebox
 
-from vcc import settings, VCCError, json_decoder, vcc_cmd
+from vcc import settings, VCCError, json_decoder, vcc_cmd, message_box
 from vcc.client import VCC
-from vcc.fslog import download_log
 from vcc.session import Session
+
+
+
+def download_log(vcc, filename):
+    if not (found := re.match(r'(?P<ses_id>[a-z0-9]*)(?P<sta_id>[a-z0-9]{2})(?P<fmt>_full\.log\.bz2|\.log)', filename)):
+        return False
+
+    ses_id, sta_id, fmt = found['ses_id'], found['sta_id'], found['fmt']
+    waiting = ProgressDots(f'Downloading {filename} ')
+    waiting.start()
+    success = 'failed!'
+    if not (rsp := vcc.get(f'/sessions/{ses_id}')) or not (session := Session(rsp.json())):
+        message_box(f'Get file {filename}', f"Session {ses_id} does not exist!", 'warning')
+    elif not (rsp := vcc.get(f'/logs/{ses_id}/{sta_id}')):
+        message_box(f'Get file {filename}', f"{filename} failed!\n{rsp.json().get('error', rsp.text)}", 'warning')
+    elif not (found := re.match(r'.*filename=\"(?P<name>.*)\".*', rsp.headers['content-disposition'])):
+        message_box(f"Download problem", f"Problem downloading {filename}\n{rsp.headers['content-disposition']}",
+                    'warning')
+    else:
+        dir_path = getattr(folders, 'log', '.') if (folders := getattr(settings, 'Folders')) else '.'
+        dir_path = dir_path.replace('{year}', session.year).replace('{session}', ses_id)
+        (p := Path(dir_path, filename)).parent.mkdir(parents=True, exist_ok=True)
+        decompress = fmt == '.log' and rsp.headers['content-type'] == 'application/stream'
+        with open(p, 'wb') as f:
+            f.write(bz2.decompress(rsp.content) if decompress else rsp.content)
+        success = 'done!'
+    waiting.stop(msg=success)
+    return True
+
+
+class ProgressDots(Thread):
+    def __init__(self, title, delay=1):
+        super().__init__()
+        self.stopped = Event()
+        self.title, self.delay = title, min(max(delay, 1), 10)
+
+    def run(self):
+        sys.stdout.write(self.title)
+        sys.stdout.flush()
+        while not self.stopped.wait(self.delay):
+            sys.stdout.write('.')
+            sys.stdout.flush()
+
+    def stop(self, msg=' done!'):
+        self.stopped.set()
+        print(msg, file=sys.stdout)
+
+
+
 
 
 # Compute md5 hash for a file

@@ -6,10 +6,67 @@ from functools import cache, lru_cache
 from datetime import datetime
 from pathlib import Path
 
+import time
+import logging
+
+
+
 from vcc import settings, message_box
 from vcc.client import VCC, VCCError
-from vcc.progress import ProgressDots
+from vcc.utils import ProgressDots
 from vcc.session import Session
+
+
+logger = logging.getLogger('vcc')
+
+
+# Send ONOFF records to VCC
+def post_onoff(vcc, records):
+    if records and vcc:
+        error = None
+        for _ in range(3):
+            try:
+                if rsp := vcc.post('/data/onoff', data=records):
+                    logger.info(f'uploaded {len(records)} onoff records for {records[0]["source"]}')
+                    return
+                error = rsp.text
+            except VCCError as exc:
+                error = str(exc)
+            time.sleep(0.1)
+        raise VCCError(error)
+
+
+def onoff(filepath):
+    is_header = re.compile(r'^(?P<time>^\d{4}\.\d{3}\.\d{2}:\d{2}:\d{2}\.\d{2})(?P<key>#onoff#    source)'
+                           r'(?P<data>.*)$').match
+    is_onoff = re.compile(r'^(?P<time>^\d{4}\.\d{3}\.\d{2}:\d{2}:\d{2}\.\d{2})(?P<key>#onoff#VAL)'
+                          r'(?P<data>.*)$').match
+    if not (path := Path(filepath)).exists() and not (path := Path(settings.Folders.log, filepath)):
+        logger.info(f'{filepath} doest not exist!')
+        return
+
+    logger.info(f'extracting onoff records from {path.name}')
+
+    header, records = [], []
+    with open(path, 'r', encoding="utf8", errors="ignore") as f, VCC('NS') as vcc:
+        for line in f:
+            if found := is_onoff(line):
+                timestamp = fs2time(found['time'])
+                record = {name: value for name, value in zip(header, found['data'].split())}
+                records.append(dict(**{'time': timestamp}, **record))
+            elif found := is_header(line):
+                header = ['source'] + found['data'].split()
+                try:
+                    post_onoff(vcc, records)  # Send existing onoff records to VCC
+                except VCCError as exc:
+                    logger.warning(f"fail uploading onoff {str(exc)}")
+                records = []
+
+        try:
+            post_onoff(vcc, records)
+        except VCCError as exc:
+            logger.warning(f"fail uploading onoff {str(exc)}")
+
 
 
 def time2fs(timestamp: float) -> str:
@@ -121,31 +178,7 @@ def upload_log(ses_id, quiet=False):
             pass
 
 
-def download_log(vcc, filename):
-    if not (found := re.match(r'(?P<ses_id>[a-z0-9]*)(?P<sta_id>[a-z0-9]{2})(?P<fmt>_full\.log\.bz2|\.log)', filename)):
-        return False
 
-    ses_id, sta_id, fmt = found['ses_id'], found['sta_id'], found['fmt']
-    waiting = ProgressDots(f'Downloading {filename} ', delay=0.5)
-    waiting.start()
-    success = 'failed!'
-    if not (rsp := vcc.get(f'/sessions/{ses_id}')) or not (session := Session(rsp.json())):
-        message_box(f'Get file {filename}', f"Session {ses_id} does not exist!", 'warning')
-    elif not (rsp := vcc.get(f'/logs/{ses_id}/{sta_id}')):
-        message_box(f'Get file {filename}', f"{filename} failed!\n{rsp.json().get('error', rsp.text)}", 'warning')
-    elif not (found := re.match(r'.*filename=\"(?P<name>.*)\".*', rsp.headers['content-disposition'])):
-        message_box(f"Download problem", f"Problem downloading {filename}\n{rsp.headers['content-disposition']}",
-                    'warning')
-    else:
-        dir_path = getattr(folders, 'log', '.') if (folders := getattr(settings, 'Folders')) else '.'
-        dir_path = dir_path.replace('{year}', session.year).replace('{session}', ses_id)
-        (p := Path(dir_path, filename)).parent.mkdir(parents=True, exist_ok=True)
-        decompress = fmt == '.log' and rsp.headers['content-type'] == 'application/stream'
-        with open(p, 'wb') as f:
-            f.write(bz2.decompress(rsp.content) if decompress else rsp.content)
-        success = 'done!'
-    waiting.stop(msg=success)
-    return True
 
 
 def main():

@@ -8,8 +8,8 @@ from pathlib import Path
 
 from vcc import VCCError, json_decoder, vcc_cmd
 from vcc.ns import get_ddout_log
-from vcc.ns.onoff import post_onoff
-from vcc.fslog import fs2time
+from vcc.ns.fslog import post_onoff
+from vcc.ns.fslog import fs2time
 
 
 logger = logging.getLogger('vcc')

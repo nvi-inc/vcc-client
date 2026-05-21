@@ -18,7 +18,7 @@ setup(
             'vcc=vcc.__main__:main',
             'vccns=vcc.ns.__main__:main',
             'message-box=vcc.windows:main',
-            'fslog=vcc.fslog:main',
+            'fslog=vcc.ns.fslog:main',
             'sessions-wnd=vcc.tools:main',
             'dashboard=vcc.__main__:main',
             'sumops=vcc.__main__:main',

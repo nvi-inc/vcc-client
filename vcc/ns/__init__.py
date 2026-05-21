@@ -57,7 +57,7 @@ def get_ddout_log():
         output, _ = Popen(['lognm'], env={'PATH': PATH}, stdout=PIPE).communicate()
         if name := output.decode('utf-8').strip():
             return Path('/usr2/log', f"{name}.log")
-        logger.warning(f"get_ddout_log failed {ouput}")
+        logger.warning(f"get_ddout_log failed {output}")
         return None
     except Exception as exc:
         logger.warning(f"get_ddout_log failed {str(exc)}")

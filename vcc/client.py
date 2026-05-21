@@ -10,10 +10,8 @@ from cryptography.hazmat.primitives import serialization
 from datetime import datetime
 
 import requests
-from sshtunnel import (BaseSSHTunnelForwarderError,
-                       HandlerSSHTunnelForwarderError, SSHTunnelForwarder)
 
-from vcc import (VCCError, json_encoder, make_object, settings, vcc_groups)
+from vcc import (VCCError, json_encoder, make_object, settings, vcc_groups, message_box)
 
 logger = logging.getLogger('vcc')
 
@@ -63,7 +61,7 @@ class VCC:
         self.group_id, self.code, self.uid = validate_group(group_id)
         # Initialize communication parameters
         self.base_url = self.url = self.protocol = None
-        self.name, self.tunnel, self.port = '', None, 0
+        self.name, self.port = '', 0
         self.http_session = None
 
         self.secret_key = str(uuid.uuid4())
@@ -97,41 +95,12 @@ class VCC:
                 raise VCCError(f'Invalid token {str(exc)}')
         return rsp
 
-    def start_tunnel(self, name, config, test=False):
-        if name == self.name and self.tunnel:
-            self.tunnel.check_tunnels()
-            if not self.tunnel.tunnel_is_up:
-                self.tunnel.restart()
-            return self.name, self.tunnel
-        tunnel = SSHTunnelForwarder(config.url, ssh_username=config.tunnel, ssh_pkey=config.key,
-                                    remote_bind_address=('localhost', config.port))
-        tunnel.daemon_forward_servers = True
-        tunnel.start()
-        self.url, self.port = 'localhost', tunnel.local_bind_port
-        if test:
-            tunnel.check_tunnels()
-
-        return name, tunnel
-
-    def tunnel_is_up(self):
-        if not self.tunnel:
-            return False
-        self.tunnel.check_tunnels()
-        return all(list(self.tunnel.tunnel_is_up.values()))
-
     # Get first available VWS client
     def connect(self):
         logger.debug('connecting')
         # Get list of VLBI Communications Center (VCC)
         for name, config in get_server():
             self.url, self.protocol, self.port = config.url, config.protocol, config.port
-            if getattr(config, 'tunnel', None):
-                logger.debug('tunnel start')
-                try:
-                    self.name, self.tunnel = self.start_tunnel(name, config)
-                except (BaseSSHTunnelForwarderError, HandlerSSHTunnelForwarderError):
-                    logger.debug('tunnel problem')
-                    continue
             # Init http session
             self.http_session = requests.Session()
             self.base_url = f'{self.protocol}://{self.url}:{self.port}'
@@ -144,12 +113,10 @@ class VCC:
 
     def close(self):
         try:
-            if self.tunnel:
-                self.tunnel.stop()
             if self.http_session:
                 self.http_session.close()
         finally:
-            self.tunnel = self.http_session = None
+            self.http_session = None
 
     @property
     # Check if site is available by requesting a welcome message
@@ -163,12 +130,29 @@ class VCC:
             pass
         return False
 
+    @staticmethod
+    def check_for_warnings(rsp):
+        rsp_dict = {}
+        if rsp.status_code == 204:
+            # OK but without any attached data
+            return rsp
+        if rsp.headers["content-type"].strip().startswith("application/json"):
+            rsp_dict = rsp.json()
+        if 'warning' in rsp_dict:
+            message_box('Warning', rsp_dict.get('warning'),'warning')
+        return rsp
+
     # GET data from web service
     @http_retry()
     def get(self, path, params=None, headers=None, timeout=None):
         headers = dict(**(headers or {}), **self.make_signature())
         rsp = self.http_session.get(url=urljoin(self.base_url, path), params=params, headers=headers, timeout=timeout)
-        return rsp if path == '/' else self.validate_signature(rsp)
+        if path =='/':
+            return rsp
+        else:
+            rsp = self.validate_signature(rsp)
+        
+        return self.check_for_warnings(rsp)
 
     # POST data to web service
     @http_retry()
@@ -176,7 +160,8 @@ class VCC:
         headers = dict(**(headers or {}), **self.make_signature())
         rsp = self.http_session.post(url=urljoin(self.base_url, path), json=json_encoder(data), files=files,
                                      params=params, headers=headers)
-        return self.validate_signature(rsp)
+        rsp = self.validate_signature(rsp)
+        return self.check_for_warnings(rsp)
 
     # PUT data to web service
     @http_retry()
@@ -184,18 +169,21 @@ class VCC:
         headers = dict(**(headers or {}), **self.make_signature())
         rsp = self.http_session.put(url=urljoin(self.base_url, path), json=json_encoder(data), files=files,
                                     headers=headers)
-        return self.validate_signature(rsp)
+        rsp = self.validate_signature(rsp)
+        return self.check_for_warnings(rsp)
+
 
     # DELETE data from web service
     @http_retry()
     def delete(self, path, headers=None):
         headers = dict(**(headers or {}), **self.make_signature())
         rsp = self.http_session.delete(url=urljoin(self.base_url, path), headers=headers)
-        return self.validate_signature(rsp)
+        rsp = self.validate_signature(rsp)
+        return self.check_for_warnings(rsp)
 
     def copy(self):
         second = VCC(self.group_id)
-        second.tunnel, second.protocol, second.url, second.port = self.tunnel, self.protocol, self.url, self.port
+        second.protocol, second.url, second.port = self.protocol, self.url, self.port
         second.http_session = requests.Session()
         second.base_url = f'{second.protocol}://{second.url}:{second.port}'
         return second

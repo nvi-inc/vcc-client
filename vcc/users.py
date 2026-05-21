@@ -11,7 +11,9 @@ def test_users():
                 with VCC(group_id) as vcc:
                     if not (rsp := vcc.get('/users/valid')):  # , headers=signature.make(group_id))
                         raise VCCError(f'has invalid response {rsp.text}')
-                    print(f"is valid! Inbox has {rsp.json().get('messages_ready', 0)} messages", end=' ')
+                    rsp_dict = rsp.json()
+                    print(f"is valid! Inbox has {rsp_dict.get('messages_ready', 0)} messages")
+                    print(f"Which VCC Server?: {rsp_dict.get('vcc','unknown')}")  
             except VCCError as exc:
                 print(f'test fails! [{str(exc)}]')
             print()
