@@ -1,4 +1,11 @@
 .DS_Store
 build/
 vcc.egg-info/
-
+*.skd
+*.snp
+*.vex
+*.log*
+__pycache__*
+*venv*
+*.json
+bin/*

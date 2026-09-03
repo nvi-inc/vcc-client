@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 vcc_groups = {'CC': 'Coordinating Center', 'OC': "Operations Center", 'AC': 'Analysis Center',
-              'CO': 'Correlator', 'NS': 'Network Station', 'DB': 'Dashboard'}
+              'CO': 'Correlator', 'NS': 'Network Station', 'DB': 'Dashboard', 'SDE': 'Single Dish Exp User'}
 # Error with VCC problems
 class VCCError(Exception):
     def __init__(self, err_msg):
